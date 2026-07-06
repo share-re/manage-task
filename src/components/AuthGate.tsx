@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { useAuth } from "./AuthProvider";
 
 // Pages reachable without being logged in.
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/signup"];
 
 /** Redirects to /login when signed out, and away from /login when signed in. */
 export default function AuthGate({ children }: { children: React.ReactNode }) {

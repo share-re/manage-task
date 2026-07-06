@@ -5,34 +5,42 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
+  const [message, setMessage] = useState<string>();
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(undefined);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    setMessage(undefined);
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) {
-      setError("メールアドレスまたはパスワードが正しくありません。");
+      setError("登録に失敗しました。入力内容をご確認ください。");
       setLoading(false);
       return;
     }
-    router.replace("/");
+    // When email confirmation is disabled, a session is returned right away.
+    // Otherwise the user must confirm via the email link before logging in.
+    if (data.session) {
+      router.replace("/");
+      return;
+    }
+    setMessage(
+      "確認メールを送信しました。メール内のリンクをクリックして登録を完了してください。",
+    );
+    setLoading(false);
   }
 
   return (
     <div className="flex flex-1 items-center justify-center px-4 py-16">
       <div className="w-full max-w-sm">
         <h1 className="mb-6 text-center text-2xl font-bold tracking-wide text-zinc-900">
-          進捗管理
+          新規登録
         </h1>
 
         <form
@@ -59,27 +67,30 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete="new-password"
               required
+              minLength={6}
               className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             />
+            <span className="text-xs text-zinc-400">6文字以上</span>
           </label>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {message && <p className="text-sm text-green-700">{message}</p>}
 
           <button
             type="submit"
             disabled={loading}
             className="mt-1 rounded-lg bg-zinc-900 px-4 py-2 font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
           >
-            {loading ? "ログイン中…" : "ログイン"}
+            {loading ? "登録中…" : "登録する"}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-zinc-600">
-          アカウントをお持ちでない方は{" "}
-          <Link href="/signup" className="font-medium text-zinc-900 underline">
-            新規登録
+          すでにアカウントをお持ちの方は{" "}
+          <Link href="/login" className="font-medium text-zinc-900 underline">
+            ログイン
           </Link>
         </p>
       </div>

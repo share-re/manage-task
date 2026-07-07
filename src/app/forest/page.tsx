@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { listTasks, taskProgress } from "@/lib/tasks";
+import { listTasks, taskProgress, updateTaskStatus, type Task } from "@/lib/tasks";
 import Garden from "./Garden";
 import Celebration from "./Celebration";
 import PlantTooltip from "./PlantTooltip";
+import TaskPanel from "./TaskPanel";
 import { fetchWeather, type Weather } from "./weather";
 import type { Plant } from "./plants";
 
@@ -36,6 +37,8 @@ function currentHour(): number {
 export default function ForestPage() {
   const [done, setDone] = useState(0);
   const [total, setTotal] = useState(0);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [showTasks, setShowTasks] = useState(false);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string>();
   const [hour, setHour] = useState(currentHour);
@@ -66,9 +69,9 @@ export default function ForestPage() {
     // stays in step with how that feature counts progress (single source of
     // truth for the tasks schema and the done/total tally).
     async function load() {
-      let progress: { done: number; total: number };
+      let list: Task[];
       try {
-        progress = taskProgress(await listTasks());
+        list = await listTasks();
       } catch (err) {
         if (!active) return;
         console.error(err);
@@ -85,6 +88,7 @@ export default function ForestPage() {
         return;
       }
       if (!active) return;
+      const progress = taskProgress(list);
       const nextDone = progress.done;
 
       // Celebrate when we cross a new multiple of 10 (but not on first load).
@@ -101,6 +105,7 @@ export default function ForestPage() {
       }
       prevDoneRef.current = nextDone;
 
+      setTasks(list);
       setTotal(progress.total);
       setDone(nextDone);
       setNote(undefined);
@@ -185,6 +190,29 @@ export default function ForestPage() {
     }
   };
 
+  // Update completion in place: check a task off (or reopen it) from the forest
+  // itself. The write reuses the 進捗管理 feature's updateTaskStatus(); the
+  // realtime subscription echoes it back, and this optimistic update makes the
+  // garden respond instantly. Rolls back on failure (e.g. not logged in / RLS).
+  function applyTasks(list: Task[]) {
+    setTasks(list);
+    const p = taskProgress(list);
+    setDone(p.done);
+    setTotal(p.total);
+  }
+  async function handleToggle(id: string, checked: boolean) {
+    const next: "done" | "todo" = checked ? "done" : "todo";
+    const snapshot = tasks;
+    applyTasks(tasks.map((t) => (t.id === id ? { ...t, status: next } : t)));
+    try {
+      await updateTaskStatus(id, next);
+    } catch (err) {
+      console.error(err);
+      applyTasks(snapshot);
+      setNote("状態の更新に失敗しました。ログイン状態を確認してください。");
+    }
+  }
+
   const effectiveDone = demoDone ?? done;
   const effectiveWeather = demoWeather ?? weather;
   const growth = growthFromDone(effectiveDone);
@@ -216,12 +244,32 @@ export default function ForestPage() {
         <Celebration milestone={celebrate} onDone={() => setCelebrate(null)} />
       )}
 
+      {showTasks && (
+        <div className="pointer-events-none absolute right-4 top-28 z-10">
+          <TaskPanel
+            tasks={tasks}
+            onToggle={handleToggle}
+            onClose={() => setShowTasks(false)}
+          />
+        </div>
+      )}
+
       {/* Overlay: title, growth, and navigation. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 p-4">
         <div className="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2 rounded-2xl bg-white/85 p-4 shadow-md ring-1 ring-black/5 backdrop-blur">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-lg font-bold text-emerald-800">🌱 植林</h1>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowTasks((v) => !v)}
+                className={`rounded-lg px-3 py-1 text-sm font-semibold ${
+                  showTasks
+                    ? "bg-emerald-600 text-white"
+                    : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                }`}
+              >
+                📋 タスク
+              </button>
               <Link
                 href="/tasks"
                 className="rounded-lg bg-emerald-500 px-3 py-1 text-sm font-semibold text-white hover:bg-emerald-600"

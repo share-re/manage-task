@@ -1,5 +1,65 @@
 import type { Plant } from "./plants";
 import { srand } from "./plants";
+import type { Weather } from "./weather";
+
+// Drifting clouds. gray (0..1) darkens them for overcast/rainy skies.
+function drawClouds(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  groundY: number,
+  t: number,
+  count: number,
+  gray: number,
+) {
+  const shade = Math.round(255 - gray * 80);
+  ctx.fillStyle = `rgba(${shade},${shade},${Math.round(shade * 0.99)},0.9)`;
+  for (let i = 0; i < count; i++) {
+    const speed = 8 + srand(i) * 10;
+    const baseX = ((srand(i * 2.3) * (w + 240) + t * speed) % (w + 240)) - 120;
+    const y = groundY * (0.12 + srand(i * 3.1) * 0.4);
+    const s = 0.7 + srand(i * 1.7) * 0.7;
+    for (const [ox, oy, r] of [
+      [0, 0, 26],
+      [24, 4, 20],
+      [-24, 4, 20],
+      [10, -10, 18],
+      [-10, -8, 16],
+    ] as const) {
+      ctx.beginPath();
+      ctx.arc(baseX + ox * s, y + oy * s, r * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// Falling rain streaks.
+function drawRain(ctx: CanvasRenderingContext2D, w: number, h: number, t: number) {
+  ctx.strokeStyle = "rgba(180,200,230,0.55)";
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 140; i++) {
+    const x = srand(i * 1.3) * w;
+    const speed = 380 + srand(i) * 220;
+    const y = (srand(i * 2.7) * h + t * speed) % h;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - 4, y + 14);
+    ctx.stroke();
+  }
+}
+
+// Drifting snowflakes.
+function drawSnow(ctx: CanvasRenderingContext2D, w: number, h: number, t: number) {
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  for (let i = 0; i < 110; i++) {
+    const speed = 40 + srand(i) * 40;
+    const y = (srand(i * 2.7) * h + t * speed) % h;
+    const x = srand(i * 1.3) * w + Math.sin(t * 0.8 + i) * 12;
+    const r = 1.5 + srand(i * 4.1) * 2;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
 
 // Linearly blend two RGB colors (f: 0 = a, 1 = b) into a css color string.
 function mix(a: number[], b: number[], f: number): string {
@@ -193,6 +253,7 @@ export function drawGarden(
   plants: Plant[],
   growth: number,
   hour: number,
+  weather: Weather,
   t: number,
 ) {
   const groundY = h * 0.5;
@@ -200,6 +261,16 @@ export function drawGarden(
 
   // Sky, sun/moon and stars for the current time of day.
   drawSky(ctx, w, groundY, hour, night, t);
+
+  // Overcast veil and clouds for non-clear weather.
+  if (weather !== "clear") {
+    const veil = weather === "rain" ? 0.28 : weather === "snow" ? 0.16 : 0.14;
+    ctx.fillStyle = `rgba(120,125,135,${veil})`;
+    ctx.fillRect(0, 0, w, groundY);
+    const count = weather === "rain" ? 6 : weather === "snow" ? 5 : 4;
+    const gray = weather === "rain" ? 0.7 : weather === "snow" ? 0.4 : 0.3;
+    drawClouds(ctx, w, groundY, t, count, gray);
+  }
 
   // Ground blends slightly darker at night.
   ctx.fillStyle = mix([191, 224, 168], [58, 84, 72], night);
@@ -253,8 +324,9 @@ export function drawGarden(
   }
 
   // Butterflies: one per 5 completed tasks (count-based), capped at 4.
-  // They rest at night, so none are drawn once it is dark.
-  const nBf = night > 0.5 ? 0 : Math.min(4, Math.floor(plants.length / 5));
+  // They rest at night and in rain/snow.
+  const calm = night <= 0.5 && weather !== "rain" && weather !== "snow";
+  const nBf = calm ? Math.min(4, Math.floor(plants.length / 5)) : 0;
   const homes = [
     [0.25, 0.35],
     [0.7, 0.5],
@@ -275,4 +347,8 @@ export function drawGarden(
     ctx.fillStyle = "#4a3b2f";
     ctx.fillRect(bx - 1, by - 4, 2, 8);
   }
+
+  // Precipitation in the foreground, over everything else.
+  if (weather === "rain") drawRain(ctx, w, h, t);
+  else if (weather === "snow") drawSnow(ctx, w, h, t);
 }

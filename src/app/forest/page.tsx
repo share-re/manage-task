@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Garden from "./Garden";
 import Celebration from "./Celebration";
+import { fetchWeather, type Weather } from "./weather";
 
 // Stage label based on the NUMBER of completed tasks (not a ratio), so the
 // forest never regresses when new tasks are added.
@@ -37,6 +38,23 @@ export default function ForestPage() {
   const [hour, setHour] = useState(currentHour);
   const [celebrate, setCelebrate] = useState<number | null>(null);
   const prevDoneRef = useRef<number | null>(null);
+  // Preview helper: "?demo=N" overrides the shown completed count without
+  // touching the shared data, for checking how the garden looks at any size.
+  const [demoDone] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const d = new URLSearchParams(window.location.search).get("demo");
+    const n = d === null ? NaN : parseInt(d, 10);
+    return Number.isNaN(n) ? null : Math.max(0, n);
+  });
+  const [weather, setWeather] = useState<Weather>("clear");
+  // Preview helper: "?weather=clear|clouds|rain|snow" forces a condition.
+  const [demoWeather] = useState<Weather | null>(() => {
+    if (typeof window === "undefined") return null;
+    const wq = new URLSearchParams(window.location.search).get("weather");
+    return wq === "clear" || wq === "clouds" || wq === "rain" || wq === "snow"
+      ? wq
+      : null;
+  });
 
   useEffect(() => {
     let active = true;
@@ -96,12 +114,50 @@ export default function ForestPage() {
     };
   }, []);
 
-  const growth = growthFromDone(done);
+  // Sync the garden weather with the real weather (falls back to Tokyo when
+  // geolocation is unavailable or denied). Skipped when "?weather=" forces one.
+  useEffect(() => {
+    if (demoWeather !== null) return;
+    let active = true;
+    let coords = { lat: 35.68, lon: 139.69 };
+    const run = () =>
+      fetchWeather(coords.lat, coords.lon)
+        .then((w) => {
+          if (active) setWeather(w);
+        })
+        .catch(() => {});
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+          run();
+        },
+        () => run(),
+        { timeout: 8000 },
+      );
+    } else {
+      run();
+    }
+    const id = setInterval(run, 600_000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [demoWeather]);
+
+  const effectiveDone = demoDone ?? done;
+  const effectiveWeather = demoWeather ?? weather;
+  const growth = growthFromDone(effectiveDone);
   const growthPercent = Math.round(growth * 100);
 
   return (
     <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-sky-100">
-      <Garden done={done} growth={growth} hour={hour} />
+      <Garden
+        done={effectiveDone}
+        growth={growth}
+        hour={hour}
+        weather={effectiveWeather}
+      />
 
       {celebrate !== null && (
         <Celebration milestone={celebrate} onDone={() => setCelebrate(null)} />
@@ -136,10 +192,10 @@ export default function ForestPage() {
               />
             </div>
             <span className="whitespace-nowrap text-sm font-medium text-emerald-700">
-              {stageLabel(done)}
+              {stageLabel(effectiveDone)}
             </span>
             <span className="whitespace-nowrap text-sm text-zinc-500">
-              🌳 {done} 本
+              🌳 {effectiveDone} 本
             </span>
           </div>
 

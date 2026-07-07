@@ -90,24 +90,47 @@ export function buildGarden(doneCount: number): Plant[] {
 // Screen placement of a plant, shared by the renderer and hover hit-testing.
 export type PlantLayout = { plant: Plant; px: number; py: number; s: number };
 
+// Memoized on (plants, w, h): the render loop and hover hit-testing both call
+// this every frame / pointer move with the same inputs, so returning the cached
+// layout avoids re-mapping and re-sorting the plant list ~60x/second. Results
+// are sorted back-to-front (by py) so the renderer can draw them directly.
+let layoutCache: {
+  plants: Plant[];
+  w: number;
+  h: number;
+  out: PlantLayout[];
+} | null = null;
+
 export function layoutPlants(
   plants: Plant[],
   w: number,
   h: number,
 ): PlantLayout[] {
+  if (
+    layoutCache &&
+    layoutCache.plants === plants &&
+    layoutCache.w === w &&
+    layoutCache.h === h
+  ) {
+    return layoutCache.out;
+  }
   const groundY = h * 0.5;
   const bandH = h - groundY;
   const scaleBase = Math.min(1.4, Math.max(0.8, h / 320));
-  return plants.map((p) => {
-    // depth: 0 = far (small, near the horizon) .. 1 = near (large, at the front)
-    const depth = (p.y - 0.5) / 0.42;
-    return {
-      plant: p,
-      px: p.x * w,
-      py: groundY + (0.06 + depth * 0.9) * bandH,
-      s: scaleBase * (0.5 + depth * 0.7) * (0.9 + srand(p.id * 1.9) * 0.2),
-    };
-  });
+  const out = plants
+    .map((p) => {
+      // depth: 0 = far (small, near the horizon) .. 1 = near (large, at the front)
+      const depth = (p.y - 0.5) / 0.42;
+      return {
+        plant: p,
+        px: p.x * w,
+        py: groundY + (0.06 + depth * 0.9) * bandH,
+        s: scaleBase * (0.5 + depth * 0.7) * (0.9 + srand(p.id * 1.9) * 0.2),
+      };
+    })
+    .sort((a, b) => a.py - b.py);
+  layoutCache = { plants, w, h, out };
+  return out;
 }
 
 // The plant whose canopy/trunk is under (cx, cy), preferring the frontmost

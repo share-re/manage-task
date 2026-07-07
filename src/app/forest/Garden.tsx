@@ -25,13 +25,27 @@ export default function Garden({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef({ done, growth, hour, weather });
 
+  // buildGarden is deterministic in `done`, so cache its result and rebuild
+  // only when `done` changes instead of allocating the list every frame /
+  // every pointer move.
+  const plantsRef = useRef<{ done: number; plants: Plant[] }>({
+    done: -1,
+    plants: [],
+  });
+  function gardenFor(done: number): Plant[] {
+    if (plantsRef.current.done !== done) {
+      plantsRef.current = { done, plants: buildGarden(done) };
+    }
+    return plantsRef.current.plants;
+  }
+
   // Which plant is under (clientX, clientY), if any.
   function plantFromEvent(clientX: number, clientY: number): Plant | null {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     const layouts = layoutPlants(
-      buildGarden(stateRef.current.done),
+      gardenFor(stateRef.current.done),
       canvas.clientWidth,
       canvas.clientHeight,
     );
@@ -58,7 +72,7 @@ export default function Garden({
       const h = canvas!.clientHeight;
       if (w === 0 || h === 0) return;
       const s = stateRef.current;
-      const plants = buildGarden(s.done);
+      const plants = gardenFor(s.done);
       drawGarden(ctx!, w, h, plants, s.growth, s.hour, s.weather, t);
     }
 

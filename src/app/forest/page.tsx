@@ -88,8 +88,11 @@ export default function ForestPage() {
       const nextDone = progress.done;
 
       // Celebrate when we cross a new multiple of 10 (but not on first load).
+      // Skipped in ?demo preview, where the garden shows demoDone, not the real
+      // count, so a real-count milestone would fire over a mismatched forest.
       const prev = prevDoneRef.current;
       if (
+        demoDone === null &&
         prev !== null &&
         nextDone > prev &&
         Math.floor(nextDone / 10) > Math.floor(prev / 10)

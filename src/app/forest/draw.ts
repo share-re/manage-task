@@ -20,8 +20,8 @@ function drawClouds(
   count: number,
   gray: number,
 ) {
-  const shade = Math.round(255 - gray * 80);
-  ctx.fillStyle = `rgba(${shade},${shade},${Math.round(shade * 0.99)},0.9)`;
+  const tone = Math.round(255 - gray * 80);
+  ctx.fillStyle = `rgba(${tone},${tone},${Math.round(tone * 0.99)},0.9)`;
   for (let i = 0; i < count; i++) {
     const speed = 8 + srand(i) * 10;
     const baseX = ((srand(i * 2.3) * (w + 240) + t * speed) % (w + 240)) - 120;
@@ -316,8 +316,9 @@ export function drawGarden(
     ctx.fill();
   }
 
-  // Plants, back-to-front by y, colored per species.
-  const layouts = layoutPlants(plants, w, h).sort((a, b) => a.py - b.py);
+  // Plants, back-to-front by y, colored per species. layoutPlants already
+  // returns them sorted (and memoized), so this is a cache hit each frame.
+  const layouts = layoutPlants(plants, w, h);
   for (const { plant, px, py, s } of layouts) {
     const color = getSpecies(plant.species).color;
     if (plant.kind === "rare") drawRare(ctx, px, py, s, t, color);

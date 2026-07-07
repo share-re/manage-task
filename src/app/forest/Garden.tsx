@@ -7,18 +7,19 @@ import { drawGarden } from "./draw";
 type Props = {
   done: number; // number of completed tasks
   growth: number; // greenery level from the completed count, 0..1
+  hour: number; // local time of day (0-24, fractional) for the day/night sky
 };
 
 // Hosts a <canvas> and runs the animation loop. React state is passed to the
 // draw loop through a ref so we never restart the loop on every render.
-export default function Garden({ done, growth }: Props) {
+export default function Garden({ done, growth, hour }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ done, growth });
+  const stateRef = useRef({ done, growth, hour });
 
   // Keep the latest values available to the animation loop without restarting it.
   useEffect(() => {
-    stateRef.current = { done, growth };
-  }, [done, growth]);
+    stateRef.current = { done, growth, hour };
+  }, [done, growth, hour]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -34,7 +35,7 @@ export default function Garden({ done, growth }: Props) {
       const h = canvas!.clientHeight;
       if (w === 0 || h === 0) return;
       const plants = buildGarden(stateRef.current.done);
-      drawGarden(ctx!, w, h, plants, stateRef.current.growth, t);
+      drawGarden(ctx!, w, h, plants, stateRef.current.growth, stateRef.current.hour, t);
     }
 
     // Size the drawing buffer to the canvas's CSS box (driven by h-full/w-full).

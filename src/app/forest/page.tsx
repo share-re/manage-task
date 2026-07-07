@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Garden from "./Garden";
+import Celebration from "./Celebration";
 
 // Stage label based on the NUMBER of completed tasks (not a ratio), so the
 // forest never regresses when new tasks are added.
@@ -23,11 +24,19 @@ function growthFromDone(done: number): number {
   return 1 - Math.pow(0.85, done);
 }
 
+function currentHour(): number {
+  const d = new Date();
+  return d.getHours() + d.getMinutes() / 60;
+}
+
 export default function ForestPage() {
   const [done, setDone] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string>();
+  const [hour, setHour] = useState(currentHour);
+  const [celebrate, setCelebrate] = useState<number | null>(null);
+  const prevDoneRef = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -46,8 +55,21 @@ export default function ForestPage() {
         return;
       }
       const rows = data ?? [];
+      const nextDone = rows.filter((r) => r.status === "done").length;
+
+      // Celebrate when we cross a new multiple of 10 (but not on first load).
+      const prev = prevDoneRef.current;
+      if (
+        prev !== null &&
+        nextDone > prev &&
+        Math.floor(nextDone / 10) > Math.floor(prev / 10)
+      ) {
+        setCelebrate(Math.floor(nextDone / 10) * 10);
+      }
+      prevDoneRef.current = nextDone;
+
       setTotal(rows.length);
-      setDone(rows.filter((r) => r.status === "done").length);
+      setDone(nextDone);
       setNote(undefined);
       setLoading(false);
     }
@@ -64,9 +86,13 @@ export default function ForestPage() {
       )
       .subscribe();
 
+    // Keep the day/night sky in sync with the clock.
+    const clock = setInterval(() => setHour(currentHour()), 60_000);
+
     return () => {
       active = false;
       supabase.removeChannel(channel);
+      clearInterval(clock);
     };
   }, []);
 
@@ -75,7 +101,11 @@ export default function ForestPage() {
 
   return (
     <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-sky-100">
-      <Garden done={done} growth={growth} />
+      <Garden done={done} growth={growth} hour={hour} />
+
+      {celebrate !== null && (
+        <Celebration milestone={celebrate} onDone={() => setCelebrate(null)} />
+      )}
 
       {/* Overlay: title, growth, and navigation. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 p-4">
@@ -117,7 +147,7 @@ export default function ForestPage() {
           {note && <p className="text-xs text-amber-600">{note}</p>}
           <p className="text-xs text-zinc-500">
             完了したタスクの数だけ緑が増えます（全 {total} 件）。10
-            件ごとにレアな植物が芽生えます。
+            件ごとにレアな植物が芽生え、お祝いが表示されます。
           </p>
         </div>
       </div>

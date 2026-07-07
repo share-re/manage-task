@@ -1,6 +1,92 @@
 import type { Plant } from "./plants";
 import { srand } from "./plants";
 
+// Linearly blend two RGB colors (f: 0 = a, 1 = b) into a css color string.
+function mix(a: number[], b: number[], f: number): string {
+  const r = Math.round(a[0] + (b[0] - a[0]) * f);
+  const g = Math.round(a[1] + (b[1] - a[1]) * f);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * f);
+  return `rgb(${r},${g},${bl})`;
+}
+
+// 0 = full day, 1 = full night, with smooth dawn (5-7h) and dusk (17-19h).
+function nightFactor(hour: number): number {
+  if (hour >= 7 && hour < 17) return 0;
+  if (hour >= 17 && hour < 19) return (hour - 17) / 2;
+  if (hour >= 5 && hour < 7) return 1 - (hour - 5) / 2;
+  return 1;
+}
+
+// Sky, celestial body (sun/moon), and stars for the given hour.
+function drawSky(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  groundY: number,
+  hour: number,
+  night: number,
+  t: number,
+) {
+  const dayTop = [214, 236, 247],
+    dayMid = [230, 243, 226],
+    dayBot = [207, 233, 196];
+  const nightTop = [18, 24, 50],
+    nightMid = [28, 36, 66],
+    nightBot = [36, 48, 72];
+  const sky = ctx.createLinearGradient(0, 0, 0, groundY);
+  sky.addColorStop(0, mix(dayTop, nightTop, night));
+  sky.addColorStop(0.6, mix(dayMid, nightMid, night));
+  sky.addColorStop(1, mix(dayBot, nightBot, night));
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, groundY);
+
+  // Warm glow at dawn/dusk (peaks mid-transition).
+  const dusk = 1 - Math.abs(night - 0.5) * 2;
+  if (dusk > 0.05) {
+    ctx.fillStyle = `rgba(240,150,90,${dusk * 0.22})`;
+    ctx.fillRect(0, 0, w, groundY);
+  }
+
+  // Stars fade in at night.
+  if (night > 0.25) {
+    const n = Math.floor(night * 90);
+    for (let i = 0; i < n; i++) {
+      const sx = srand(i * 2.1) * w;
+      const sy = srand(i * 3.7) * groundY * 0.9;
+      const tw = 0.5 + 0.5 * Math.sin(t * 2 + i);
+      ctx.fillStyle = `rgba(255,255,255,${night * (0.3 + tw * 0.5)})`;
+      ctx.fillRect(sx, sy, 1.6, 1.6);
+    }
+  }
+
+  // Sun during the day, moon at night, tracking the hour across the sky.
+  if (night < 0.5) {
+    const fx = Math.max(0, Math.min(1, (hour - 6) / 12));
+    const cx = fx * w;
+    const cy = groundY * 0.15 + (1 - Math.sin(fx * Math.PI)) * groundY * 0.25;
+    ctx.fillStyle = "rgba(255,235,150,0.25)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,225,120,0.95)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    const nf = hour >= 18 ? (hour - 18) / 12 : (hour + 6) / 12;
+    const cx = nf * w;
+    const cy = groundY * 0.18 + (1 - Math.sin(nf * Math.PI)) * groundY * 0.22;
+    ctx.fillStyle = "rgba(240,240,220,0.95)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+    ctx.fill();
+    // Carve a crescent using the sky color behind it.
+    ctx.fillStyle = mix(nightTop, nightMid, 0.5);
+    ctx.beginPath();
+    ctx.arc(cx + 7, cy - 3, 16, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 // A normal tree, drawn procedurally. t is elapsed seconds (for the sway).
 function drawTree(
   ctx: CanvasRenderingContext2D,
@@ -98,25 +184,25 @@ function drawRare(
   }
 }
 
-// Draw one frame of the whole forest view.
+// Draw one frame of the whole forest view. hour is the local time of day
+// (0-24, fractional) driving the day/night sky.
 export function drawGarden(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
   plants: Plant[],
   growth: number,
+  hour: number,
   t: number,
 ) {
-  // Sky-to-ground gradient. It gets greener as growth rises.
-  const sky = ctx.createLinearGradient(0, 0, 0, h);
-  sky.addColorStop(0, "#d6ecf7");
-  sky.addColorStop(0.55, "#e6f3e2");
-  sky.addColorStop(1, "#cfe9c4");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, h);
-
   const groundY = h * 0.5;
-  ctx.fillStyle = "#bfe0a8";
+  const night = nightFactor(hour);
+
+  // Sky, sun/moon and stars for the current time of day.
+  drawSky(ctx, w, groundY, hour, night, t);
+
+  // Ground blends slightly darker at night.
+  ctx.fillStyle = mix([191, 224, 168], [58, 84, 72], night);
   ctx.fillRect(0, groundY, w, h - groundY);
 
   // Grass tufts (more as growth rises).
@@ -167,7 +253,8 @@ export function drawGarden(
   }
 
   // Butterflies: one per 5 completed tasks (count-based), capped at 4.
-  const nBf = Math.min(4, Math.floor(plants.length / 5));
+  // They rest at night, so none are drawn once it is dark.
+  const nBf = night > 0.5 ? 0 : Math.min(4, Math.floor(plants.length / 5));
   const homes = [
     [0.25, 0.35],
     [0.7, 0.5],

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 import {
   getEmailSettings,
   saveEmailSettings,
@@ -10,6 +11,8 @@ import {
 } from "@/lib/emailSettings";
 
 export default function MailSettingsPage() {
+  const { session } = useAuth();
+
   const [settingsId, setSettingsId] = useState<string>();
   const [recipients, setRecipients] = useState("");
   const [frequency, setFrequency] = useState<MailFrequency>("weekly");
@@ -21,6 +24,42 @@ export default function MailSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+
+  // Test send: default the recipient to the logged-in user's own address.
+  const [testRecipient, setTestRecipient] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testMessage, setTestMessage] = useState<string>();
+  const [testError, setTestError] = useState<string>();
+
+  useEffect(() => {
+    if (session?.user.email && !testRecipient) {
+      setTestRecipient(session.user.email);
+    }
+  }, [session, testRecipient]);
+
+  async function onTestSend() {
+    setTesting(true);
+    setTestMessage(undefined);
+    setTestError(undefined);
+    try {
+      const res = await fetch("/api/send-summary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({ testRecipient: testRecipient.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "送信に失敗しました。");
+      setTestMessage(`テスト送信しました：${(data.sentTo ?? []).join(", ")}`);
+    } catch (err) {
+      console.error(err);
+      setTestError(err instanceof Error ? err.message : "送信に失敗しました。");
+    } finally {
+      setTesting(false);
+    }
+  }
 
   useEffect(() => {
     getEmailSettings()
@@ -174,6 +213,42 @@ export default function MailSettingsPage() {
             {saving ? "保存中…" : "保存する"}
           </button>
         </form>
+      )}
+
+      {/* Test send: send the current progress summary once, to confirm delivery. */}
+      {loaded && (
+        <div className="mt-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
+          <h2 className="text-lg font-semibold text-zinc-800">テスト送信</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            現在の進捗サマリを1通だけ送って、届くか確認できます。まずは自分のアドレスでお試しください。
+          </p>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-700">
+                テスト送信先
+              </span>
+              <input
+                type="email"
+                value={testRecipient}
+                onChange={(e) => setTestRecipient(e.target.value)}
+                placeholder="自分のメールアドレス"
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={onTestSend}
+              disabled={testing || !testRecipient.trim()}
+              className="rounded-lg border border-zinc-300 px-5 py-2 font-medium text-zinc-800 transition hover:bg-zinc-100 disabled:opacity-50"
+            >
+              {testing ? "送信中…" : "テスト送信"}
+            </button>
+          </div>
+          {testError && <p className="mt-2 text-sm text-red-600">{testError}</p>}
+          {testMessage && (
+            <p className="mt-2 text-sm text-green-700">{testMessage}</p>
+          )}
+        </div>
       )}
     </main>
   );

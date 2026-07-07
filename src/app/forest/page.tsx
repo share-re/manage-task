@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Garden from "./Garden";
 import Celebration from "./Celebration";
+import PlantTooltip from "./PlantTooltip";
 import { fetchWeather, type Weather } from "./weather";
+import type { Plant } from "./plants";
 
 // Stage label based on the NUMBER of completed tasks (not a ratio), so the
 // forest never regresses when new tasks are added.
@@ -145,6 +147,31 @@ export default function ForestPage() {
     };
   }, [demoWeather]);
 
+  // Plant detail tooltip (hover on desktop, tap on mobile). A short grace
+  // period keeps it open while the pointer travels onto the panel.
+  const [picked, setPicked] = useState<{ plant: Plant; x: number; y: number } | null>(
+    null,
+  );
+  const closeTimer = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimer.current !== null) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => setPicked(null), 160);
+  };
+  const handlePick = (plant: Plant | null, x: number, y: number) => {
+    if (plant) {
+      cancelClose();
+      setPicked({ plant, x, y });
+    } else {
+      scheduleClose();
+    }
+  };
+
   const effectiveDone = demoDone ?? done;
   const effectiveWeather = demoWeather ?? weather;
   const growth = growthFromDone(effectiveDone);
@@ -157,7 +184,20 @@ export default function ForestPage() {
         growth={growth}
         hour={hour}
         weather={effectiveWeather}
+        onPickPlant={handlePick}
       />
+
+      {picked && (
+        <PlantTooltip
+          key={picked.plant.species}
+          plant={picked.plant}
+          x={picked.x}
+          y={picked.y}
+          onKeepOpen={cancelClose}
+          onRequestClose={scheduleClose}
+          onClose={() => setPicked(null)}
+        />
+      )}
 
       {celebrate !== null && (
         <Celebration milestone={celebrate} onDone={() => setCelebrate(null)} />

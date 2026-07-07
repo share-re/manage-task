@@ -1,6 +1,15 @@
 import type { Plant } from "./plants";
-import { srand } from "./plants";
+import { srand, layoutPlants, getSpecies } from "./plants";
 import type { Weather } from "./weather";
+
+// Darken a #rrggbb color by factor f (0..1).
+function shade(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * f);
+  const g = Math.round(((n >> 8) & 255) * f);
+  const b = Math.round((n & 255) * f);
+  return `rgb(${r},${g},${b})`;
+}
 
 // Drifting clouds. gray (0..1) darkens them for overcast/rainy skies.
 function drawClouds(
@@ -147,7 +156,8 @@ function drawSky(
   }
 }
 
-// A normal tree, drawn procedurally. t is elapsed seconds (for the sway).
+// A normal tree, drawn procedurally. color is the species canopy color;
+// t is elapsed seconds (for the sway).
 function drawTree(
   ctx: CanvasRenderingContext2D,
   px: number,
@@ -155,6 +165,7 @@ function drawTree(
   scale: number,
   t: number,
   seed: number,
+  color: string,
 ) {
   const sway = Math.sin(t * 1.2 + seed * 3) * 2 * scale;
   ctx.fillStyle = "rgba(40,60,30,0.18)";
@@ -163,7 +174,7 @@ function drawTree(
   ctx.fill();
   ctx.fillStyle = "#7a5236";
   ctx.fillRect(px - 4 * scale, py - 30 * scale, 8 * scale, 32 * scale);
-  const greens = ["#3e7d46", "#4f9455", "#67ab68"];
+  const greens = [shade(color, 0.78), shade(color, 0.9), color];
   for (let i = 0; i < 3; i++) {
     ctx.fillStyle = greens[i];
     ctx.beginPath();
@@ -174,14 +185,14 @@ function drawTree(
   }
 }
 
-// A rare plant. Swap the canopy fill to a sprite (drawImage) later if desired.
+// A rare plant: a bigger canopy in the species color plus a sparkle.
 function drawRare(
   ctx: CanvasRenderingContext2D,
-  p: Plant,
   px: number,
   py: number,
   scale: number,
   t: number,
+  color: string,
 ) {
   const sway = Math.sin(t * 1.4 + px) * 2 * scale;
   ctx.fillStyle = "rgba(40,60,30,0.20)";
@@ -191,32 +202,16 @@ function drawRare(
   ctx.fillStyle = "#8a5b3a";
   ctx.fillRect(px - 4.5 * scale, py - 32 * scale, 9 * scale, 34 * scale);
 
-  const canopy = (color: string) => {
-    ctx.fillStyle = color;
-    for (const [ox, oy, r] of [
-      [0, -40, 20],
-      [-16, -32, 15],
-      [16, -32, 15],
-      [0, -26, 15],
-    ] as const) {
-      ctx.beginPath();
-      ctx.arc(px + ox * scale + sway, py + oy * scale, r * scale, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  };
-
-  switch (p.species) {
-    case "sakura":
-      canopy("#f4b8d0");
-      break;
-    case "golden":
-      canopy("#e8c24a");
-      break;
-    case "blue_rose":
-      canopy("#7fa8e8");
-      break;
-    default:
-      canopy("#c48fd8");
+  ctx.fillStyle = color;
+  for (const [ox, oy, r] of [
+    [0, -40, 20],
+    [-16, -32, 15],
+    [16, -32, 15],
+    [0, -26, 15],
+  ] as const) {
+    ctx.beginPath();
+    ctx.arc(px + ox * scale + sway, py + oy * scale, r * scale, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // Sparkle marks the rare plant.
@@ -312,15 +307,12 @@ export function drawGarden(
     ctx.fill();
   }
 
-  // Plants, back-to-front by y.
-  const scaleBase = Math.min(1.4, Math.max(0.8, h / 320));
-  const sorted = [...plants].sort((a, b) => a.y - b.y);
-  for (const p of sorted) {
-    const px = p.x * w;
-    const py = groundY + p.y * (h - groundY) * 0.9;
-    const s = scaleBase * (0.85 + srand(p.id) * 0.3);
-    if (p.kind === "rare") drawRare(ctx, p, px, py, s, t);
-    else drawTree(ctx, px, py, s, t, p.id);
+  // Plants, back-to-front by y, colored per species.
+  const layouts = layoutPlants(plants, w, h).sort((a, b) => a.py - b.py);
+  for (const { plant, px, py, s } of layouts) {
+    const color = getSpecies(plant.species).color;
+    if (plant.kind === "rare") drawRare(ctx, px, py, s, t, color);
+    else drawTree(ctx, px, py, s, t, plant.id, color);
   }
 
   // Butterflies: one per 5 completed tasks (count-based), capped at 4.

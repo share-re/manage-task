@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { buildGarden } from "./plants";
+import { buildGarden, layoutPlants, plantAt, type Plant } from "./plants";
 import { drawGarden } from "./draw";
 import type { Weather } from "./weather";
 
@@ -10,13 +10,34 @@ type Props = {
   growth: number; // greenery level from the completed count, 0..1
   hour: number; // local time of day (0-24, fractional) for the day/night sky
   weather: Weather; // current weather condition
+  onPickPlant?: (plant: Plant | null, clientX: number, clientY: number) => void;
 };
 
 // Hosts a <canvas> and runs the animation loop. React state is passed to the
 // draw loop through a ref so we never restart the loop on every render.
-export default function Garden({ done, growth, hour, weather }: Props) {
+export default function Garden({
+  done,
+  growth,
+  hour,
+  weather,
+  onPickPlant,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef({ done, growth, hour, weather });
+
+  // Which plant is under (clientX, clientY), if any.
+  function plantFromEvent(clientX: number, clientY: number): Plant | null {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const layouts = layoutPlants(
+      buildGarden(stateRef.current.done),
+      canvas.clientWidth,
+      canvas.clientHeight,
+    );
+    const hit = plantAt(layouts, clientX - rect.left, clientY - rect.top);
+    return hit ? hit.plant : null;
+  }
 
   // Keep the latest values available to the animation loop without restarting it.
   useEffect(() => {
@@ -73,5 +94,21 @@ export default function Garden({ done, growth, hour, weather }: Props) {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 h-full w-full"
+      onPointerMove={(e) => {
+        if (e.pointerType !== "mouse" || !onPickPlant) return;
+        const plant = plantFromEvent(e.clientX, e.clientY);
+        e.currentTarget.style.cursor = plant ? "pointer" : "default";
+        onPickPlant(plant, e.clientX, e.clientY);
+      }}
+      onPointerLeave={() => onPickPlant?.(null, 0, 0)}
+      onClick={(e) => {
+        if (!onPickPlant) return;
+        onPickPlant(plantFromEvent(e.clientX, e.clientY), e.clientX, e.clientY);
+      }}
+    />
+  );
 }

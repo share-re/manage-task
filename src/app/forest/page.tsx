@@ -1,18 +1,109 @@
-import Link from "next/link";
+"use client";
 
-// 植林 (placeholder page; the owner will build the real feature later).
-//
-// Note for the owner: the whole screen should gradually turn greener
-// (grass, trees, flowers) as more tasks are completed — an image of the
-// entire view growing lush, not just a single tree. The completion count
-// is meant to come from the 進捗管理 feature's data.
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import Garden from "./Garden";
+
+// Stage label based on team-wide progress.
+function stageLabel(progress: number): string {
+  if (progress >= 1) return "🏕 フォレスト完成！";
+  if (progress >= 0.75) return "🌲 もうすぐ森";
+  if (progress >= 0.5) return "🌳 育ちざかり";
+  if (progress >= 0.25) return "🌿 若葉";
+  if (progress > 0) return "🌱 芽生え";
+  return "🪴 まだ土だけ";
+}
+
 export default function ForestPage() {
+  const [done, setDone] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [note, setNote] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+
+    // Read completion straight from the shared "tasks" table so the forest
+    // grows with the 進捗管理 feature. Once feature/tasks lands on main we can
+    // switch to its taskProgress() helper.
+    async function load() {
+      const { data, error } = await supabase.from("tasks").select("status");
+      if (!active) return;
+      if (error) {
+        setNote("進捗データを読み込めませんでした（tasks テーブル未作成の可能性）。");
+        setDone(0);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
+      const rows = data ?? [];
+      setTotal(rows.length);
+      setDone(rows.filter((r) => r.status === "done").length);
+      setNote(undefined);
+      setLoading(false);
+    }
+
+    load();
+
+    // Reflect other members' task updates in real time.
+    const channel = supabase
+      .channel("forest-tasks")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tasks" },
+        load,
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const progress = total === 0 ? 0 : done / total;
+  const percent = Math.round(progress * 100);
+
   return (
-    <main style={{ padding: 40, fontFamily: "system-ui, sans-serif" }}>
-      <h1>植林（準備中）</h1>
-      <p>この機能はこれから担当者が作ります。</p>
-      <p>進捗が進むほど、この画面全体の緑が育っていく予定です。</p>
-      <Link href="/">← トップに戻る</Link>
+    <main className="relative flex-1 overflow-hidden">
+      <Garden done={done} progress={progress} />
+
+      {/* Overlay: title, progress, and navigation. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 p-4">
+        <div className="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2 rounded-2xl bg-white/85 p-4 shadow-md ring-1 ring-black/5 backdrop-blur">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-lg font-bold text-emerald-800">🌱 植林</h1>
+            <Link
+              href="/"
+              className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100"
+            >
+              ← トップに戻る
+            </Link>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-emerald-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-lime-400 to-emerald-500 transition-all duration-500"
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+            <span className="whitespace-nowrap text-sm font-medium text-emerald-700">
+              {stageLabel(progress)}
+            </span>
+            <span className="whitespace-nowrap text-sm text-zinc-500">
+              {done}/{total}
+            </span>
+          </div>
+
+          {loading && <p className="text-xs text-zinc-400">読み込み中…</p>}
+          {note && <p className="text-xs text-amber-600">{note}</p>}
+          <p className="text-xs text-zinc-500">
+            タスクを完了するほど緑が育ちます。10 タスクごとにレアな植物が芽生えます。
+          </p>
+        </div>
+      </div>
     </main>
   );
 }

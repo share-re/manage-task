@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { listTasks, taskProgress } from "@/lib/tasks";
 import Garden from "./Garden";
 import Celebration from "./Celebration";
 import PlantTooltip from "./PlantTooltip";
@@ -61,21 +62,23 @@ export default function ForestPage() {
   useEffect(() => {
     let active = true;
 
-    // Read completion straight from the shared "tasks" table so the forest
-    // grows with the 進捗管理 feature. Once feature/tasks lands on main we can
-    // switch to its taskProgress() helper.
+    // Read completion through the 進捗管理 feature's shared helper so the forest
+    // stays in step with how that feature counts progress (single source of
+    // truth for the tasks schema and the done/total tally).
     async function load() {
-      const { data, error } = await supabase.from("tasks").select("status");
-      if (!active) return;
-      if (error) {
+      let progress: { done: number; total: number };
+      try {
+        progress = taskProgress(await listTasks());
+      } catch {
+        if (!active) return;
         setNote("進捗データを読み込めませんでした（tasks テーブル未作成の可能性）。");
         setDone(0);
         setTotal(0);
         setLoading(false);
         return;
       }
-      const rows = data ?? [];
-      const nextDone = rows.filter((r) => r.status === "done").length;
+      if (!active) return;
+      const nextDone = progress.done;
 
       // Celebrate when we cross a new multiple of 10 (but not on first load).
       const prev = prevDoneRef.current;
@@ -88,7 +91,7 @@ export default function ForestPage() {
       }
       prevDoneRef.current = nextDone;
 
-      setTotal(rows.length);
+      setTotal(progress.total);
       setDone(nextDone);
       setNote(undefined);
       setLoading(false);

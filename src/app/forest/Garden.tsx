@@ -28,35 +28,44 @@ export default function Garden({ done, progress }: Props) {
 
     let raf = 0;
 
-    function resize() {
-      const parent = canvas!.parentElement;
-      if (!parent) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = parent.clientWidth;
-      const h = parent.clientHeight;
-      canvas!.width = w * dpr;
-      canvas!.height = h * dpr;
-      canvas!.style.width = w + "px";
-      canvas!.style.height = h + "px";
-      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Draw one frame at time t.
+    function render(t: number) {
+      const w = canvas!.clientWidth;
+      const h = canvas!.clientHeight;
+      if (w === 0 || h === 0) return;
+      const plants = buildGarden(stateRef.current.done);
+      drawGarden(ctx!, w, h, plants, stateRef.current.progress, t);
     }
+
+    // Size the drawing buffer to the canvas's CSS box (driven by h-full/w-full).
+    // A ResizeObserver re-runs this once layout settles, avoiding a 0-size canvas
+    // when the effect runs before the flex layout has dimensions. We draw a frame
+    // right after sizing so the garden is visible even while rAF is paused
+    // (e.g. a hidden/background tab), where only the animation would stall.
+    function resize() {
+      const w = canvas!.clientWidth;
+      const h = canvas!.clientHeight;
+      if (w === 0 || h === 0) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas!.width = Math.round(w * dpr);
+      canvas!.height = Math.round(h * dpr);
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      render(0);
+    }
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
     resize();
-    window.addEventListener("resize", resize);
 
     const start = performance.now();
     function frame(now: number) {
-      const t = (now - start) / 1000;
-      const w = canvas!.clientWidth;
-      const h = canvas!.clientHeight;
-      const plants = buildGarden(stateRef.current.done);
-      drawGarden(ctx!, w, h, plants, stateRef.current.progress, t);
+      render((now - start) / 1000);
       raf = requestAnimationFrame(frame);
     }
     raf = requestAnimationFrame(frame);
 
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
+      observer.disconnect();
     };
   }, []);
 

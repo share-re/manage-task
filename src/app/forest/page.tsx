@@ -74,12 +74,20 @@ export default function ForestPage() {
         <div className="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2 rounded-2xl bg-white/85 p-4 shadow-md ring-1 ring-black/5 backdrop-blur">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-lg font-bold text-emerald-800">🌱 植林</h1>
-            <Link
-              href="/"
-              className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100"
-            >
-              ← トップに戻る
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/tasks"
+                className="rounded-lg bg-emerald-500 px-3 py-1 text-sm font-semibold text-white hover:bg-emerald-600"
+              >
+                進捗管理を開く →
+              </Link>
+              <Link
+                href="/"
+                className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100"
+              >
+                ← トップ
+              </Link>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">

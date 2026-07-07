@@ -60,13 +60,19 @@ export function getSpecies(key: string): Species {
 // A rare plant appears every this many completed tasks.
 export const RARE_EVERY = 10;
 
+// Cap on how many plants are actually drawn, to keep the frame cheap no matter
+// how large the completed count grows. The forest looks full well before this.
+export const MAX_PLANTS = 160;
+
 // Build the plant list from the number of completed tasks.
 // - normal: one common tree per completed task
 // - rare: every RARE_EVERY-th plant is a notable species
 // Positions/species come from a seeded RNG, so existing plants never change.
+// Drawing is capped at MAX_PLANTS; the count/stage still track the real total.
 export function buildGarden(doneCount: number): Plant[] {
   const plants: Plant[] = [];
-  for (let i = 1; i <= doneCount; i++) {
+  const n = Math.min(doneCount, MAX_PLANTS);
+  for (let i = 1; i <= n; i++) {
     const isRare = i % RARE_EVERY === 0;
     const list = isRare ? RARE_SPECIES_LIST : COMMON_SPECIES;
     const sp = list[Math.floor(srand(i * 7.3) * list.length)];
@@ -90,13 +96,18 @@ export function layoutPlants(
   h: number,
 ): PlantLayout[] {
   const groundY = h * 0.5;
+  const bandH = h - groundY;
   const scaleBase = Math.min(1.4, Math.max(0.8, h / 320));
-  return plants.map((p) => ({
-    plant: p,
-    px: p.x * w,
-    py: groundY + p.y * (h - groundY) * 0.9,
-    s: scaleBase * (0.85 + srand(p.id) * 0.3),
-  }));
+  return plants.map((p) => {
+    // depth: 0 = far (small, near the horizon) .. 1 = near (large, at the front)
+    const depth = (p.y - 0.5) / 0.42;
+    return {
+      plant: p,
+      px: p.x * w,
+      py: groundY + (0.06 + depth * 0.9) * bandH,
+      s: scaleBase * (0.5 + depth * 0.7) * (0.9 + srand(p.id * 1.9) * 0.2),
+    };
+  });
 }
 
 // The plant whose canopy/trunk is under (cx, cy), preferring the frontmost

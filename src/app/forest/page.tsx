@@ -69,11 +69,18 @@ export default function ForestPage() {
       let progress: { done: number; total: number };
       try {
         progress = taskProgress(await listTasks());
-      } catch {
+      } catch (err) {
         if (!active) return;
-        setNote("進捗データを読み込めませんでした（tasks テーブル未作成の可能性）。");
-        setDone(0);
-        setTotal(0);
+        console.error(err);
+        // The first load has nothing to show yet, so surface the problem. A
+        // later (realtime-triggered) refresh that fails should keep the
+        // last-known garden rather than collapse it to bare ground over a
+        // transient blip. prevDoneRef is null only until the first success.
+        if (prevDoneRef.current === null) {
+          setNote("進捗データを読み込めませんでした。ログイン状態や接続を確認してください。");
+          setDone(0);
+          setTotal(0);
+        }
         setLoading(false);
         return;
       }

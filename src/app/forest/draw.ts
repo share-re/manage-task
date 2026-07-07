@@ -127,32 +127,41 @@ function drawSky(
     }
   }
 
-  // Sun during the day, moon at night, tracking the hour across the sky.
+  // Sun by day, moon by night, sharing one arc that rises from and sets to the
+  // horizon (cy = groundY at the ends, peak near the top mid-way). Anchoring
+  // both ends to the horizon keeps either body from popping in mid-sky at the
+  // day/night handoff. `fraction` (0..1) spans each body's time across the sky.
+  const drawCelestial = (fraction: number, kind: "sun" | "moon") => {
+    const cx = fraction * w;
+    const cy = groundY - Math.sin(fraction * Math.PI) * groundY * 0.82;
+    if (kind === "sun") {
+      ctx.fillStyle = "rgba(255,235,150,0.25)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 34, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,225,120,0.95)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "rgba(240,240,220,0.95)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+      ctx.fill();
+      // Carve a crescent using the sky color behind it.
+      ctx.fillStyle = mix(nightTop, nightMid, 0.5);
+      ctx.beginPath();
+      ctx.arc(cx + 7, cy - 3, 16, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
   if (night < 0.5) {
-    const fx = Math.max(0, Math.min(1, (hour - 6) / 12));
-    const cx = fx * w;
-    const cy = groundY * 0.15 + (1 - Math.sin(fx * Math.PI)) * groundY * 0.25;
-    ctx.fillStyle = "rgba(255,235,150,0.25)";
-    ctx.beginPath();
-    ctx.arc(cx, cy, 34, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,225,120,0.95)";
-    ctx.beginPath();
-    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
-    ctx.fill();
+    // Sun tracks 06:00 → 18:00, left to right.
+    drawCelestial(Math.max(0, Math.min(1, (hour - 6) / 12)), "sun");
   } else {
-    const nf = hour >= 18 ? (hour - 18) / 12 : (hour + 6) / 12;
-    const cx = nf * w;
-    const cy = groundY * 0.18 + (1 - Math.sin(nf * Math.PI)) * groundY * 0.22;
-    ctx.fillStyle = "rgba(240,240,220,0.95)";
-    ctx.beginPath();
-    ctx.arc(cx, cy, 18, 0, Math.PI * 2);
-    ctx.fill();
-    // Carve a crescent using the sky color behind it.
-    ctx.fillStyle = mix(nightTop, nightMid, 0.5);
-    ctx.beginPath();
-    ctx.arc(cx + 7, cy - 3, 16, 0, Math.PI * 2);
-    ctx.fill();
+    // Moon tracks its 18:00 → 06:00 window with the same horizon-anchored arc.
+    drawCelestial((((hour + 6) % 24) / 12), "moon");
   }
 }
 

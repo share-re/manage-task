@@ -30,7 +30,12 @@ export function fetchWikiSummary(title: string): Promise<WikiSummary> {
         pageUrl: d?.content_urls?.desktop?.page,
       }),
     )
-    .catch((): WikiSummary => ({ title, extract: "情報を取得できませんでした。" }));
+    .catch((): WikiSummary => {
+      // Don't let a transient failure poison the cache: drop the entry so a
+      // later hover refetches instead of showing this fallback text forever.
+      cache.delete(title);
+      return { title, extract: "情報を取得できませんでした。" };
+    });
 
   cache.set(title, p);
   return p;

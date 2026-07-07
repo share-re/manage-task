@@ -2,11 +2,18 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 
 // 会話1件分。role は "user"（自分）か "model"（AI内田さん）。
 type Msg = { role: "user" | "model"; text: string };
 
 export default function AssistantPage() {
+  const { session } = useAuth();
+  // ログイン中の名前。表示名が無ければメールの@より前を名前代わりに使う。
+  const metaName = session?.user.user_metadata?.name as string | undefined;
+  const email = session?.user.email;
+  const userName = metaName ?? (email ? email.split("@")[0] : "");
+
   const [messages, setMessages] = useState<Msg[]>([]); // これまでの会話
   const [input, setInput] = useState(""); // 入力欄の文字
   const [loading, setLoading] = useState(false); // 返答待ちかどうか
@@ -32,7 +39,7 @@ export default function AssistantPage() {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({ message: text, history, userName }),
       });
       const data = await res.json();
       if (!res.ok) {

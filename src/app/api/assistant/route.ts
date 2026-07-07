@@ -20,7 +20,7 @@ export async function POST(req: Request) {
   }
 
   // リクエストの中身（JSON）を取り出す。壊れていたら400で返す。
-  let body: { message?: unknown; history?: unknown };
+  let body: { message?: unknown; history?: unknown; userName?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -33,6 +33,9 @@ export async function POST(req: Request) {
     return Response.json({ error: "メッセージが空です。" }, { status: 400 });
   }
 
+  // 相手の名前（ログイン中のユーザー名）。あれば人格に伝えて「〇〇さん」と呼ばせる。
+  const userName = typeof body.userName === "string" ? body.userName.trim() : "";
+
   // これまでの会話履歴を、Geminiが受け取れる形（role + parts）に整える。
   // 想定外のデータが混ざっても落ちないよう、型を確かめながら変換する。
   const rawHistory = Array.isArray(body.history) ? (body.history as ChatTurn[]) : [];
@@ -44,10 +47,15 @@ export async function POST(req: Request) {
     // 鍵を渡してGeminiクライアントを用意する。
     const ai = new GoogleGenAI({ apiKey });
 
+    // 名前が分かっていれば、人格プロンプトの末尾に「今の相手」を1行足す。
+    const systemInstruction = userName
+      ? `${UCHIDA_SYSTEM_PROMPT}\n\n# 今話している相手\n相手の表示名は「${userName}」です。この名前で呼びかけてください（呼び方ルールに従い、性別が不明なら「${userName}さん」）。`
+      : UCHIDA_SYSTEM_PROMPT;
+
     // 人格プロンプトを systemInstruction（土台の指示）として渡し、履歴も渡す。
     const chat = ai.chats.create({
       model: "gemini-2.5-flash",
-      config: { systemInstruction: UCHIDA_SYSTEM_PROMPT },
+      config: { systemInstruction },
       history,
     });
 

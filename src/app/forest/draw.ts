@@ -104,10 +104,10 @@ export function drawGarden(
   w: number,
   h: number,
   plants: Plant[],
-  progress: number,
+  growth: number,
   t: number,
 ) {
-  // Sky-to-ground gradient. It gets greener as progress rises.
+  // Sky-to-ground gradient. It gets greener as growth rises.
   const sky = ctx.createLinearGradient(0, 0, 0, h);
   sky.addColorStop(0, "#d6ecf7");
   sky.addColorStop(0.55, "#e6f3e2");
@@ -119,8 +119,8 @@ export function drawGarden(
   ctx.fillStyle = "#bfe0a8";
   ctx.fillRect(0, groundY, w, h - groundY);
 
-  // Grass tufts (more as progress rises).
-  const tufts = Math.floor(progress * 80);
+  // Grass tufts (more as growth rises).
+  const tufts = Math.floor(growth * 80);
   ctx.lineWidth = 1.6;
   for (let i = 0; i < tufts; i++) {
     const gx = (0.04 + srand(i + 10) * 0.92) * w;
@@ -136,8 +136,8 @@ export function drawGarden(
     ctx.stroke();
   }
 
-  // Flowers (from 40% progress).
-  const flowers = Math.max(0, Math.floor((progress - 0.4) * 50));
+  // Flowers (from 40% growth).
+  const flowers = Math.max(0, Math.floor((growth - 0.4) * 50));
   for (let i = 0; i < flowers; i++) {
     const fx = (0.05 + srand(i + 200) * 0.9) * w;
     const fy = groundY + srand(i + 300) * (h - groundY) * 0.85 + 8;
@@ -166,8 +166,8 @@ export function drawGarden(
     else drawTree(ctx, px, py, s, t, p.id);
   }
 
-  // Butterflies (one per 25% progress).
-  const nBf = Math.floor(progress * 4 + 0.001);
+  // Butterflies: one per 5 completed tasks (count-based), capped at 4.
+  const nBf = Math.min(4, Math.floor(plants.length / 5));
   const homes = [
     [0.25, 0.35],
     [0.7, 0.5],

@@ -5,14 +5,22 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import Garden from "./Garden";
 
-// Stage label based on team-wide progress.
-function stageLabel(progress: number): string {
-  if (progress >= 1) return "🏕 フォレスト完成！";
-  if (progress >= 0.75) return "🌲 もうすぐ森";
-  if (progress >= 0.5) return "🌳 育ちざかり";
-  if (progress >= 0.25) return "🌿 若葉";
-  if (progress > 0) return "🌱 芽生え";
-  return "🪴 まだ土だけ";
+// Stage label based on the NUMBER of completed tasks (not a ratio), so the
+// forest never regresses when new tasks are added.
+function stageLabel(done: number): string {
+  if (done === 0) return "🪴 さら地";
+  if (done < 5) return "🌱 芽生え";
+  if (done < 10) return "🌿 若葉";
+  if (done < 20) return "🌳 育ちざかり";
+  if (done < 40) return "🌲 もうすぐ森";
+  return "🏕 フォレスト";
+}
+
+// Greenery level derived from the completed count. Monotonically increasing and
+// saturating toward 1, so completing tasks always adds green and adding new
+// (incomplete) tasks never removes any.
+function growthFromDone(done: number): number {
+  return 1 - Math.pow(0.85, done);
 }
 
 export default function ForestPage() {
@@ -62,14 +70,14 @@ export default function ForestPage() {
     };
   }, []);
 
-  const progress = total === 0 ? 0 : done / total;
-  const percent = Math.round(progress * 100);
+  const growth = growthFromDone(done);
+  const growthPercent = Math.round(growth * 100);
 
   return (
     <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-sky-100">
-      <Garden done={done} progress={progress} />
+      <Garden done={done} growth={growth} />
 
-      {/* Overlay: title, progress, and navigation. */}
+      {/* Overlay: title, growth, and navigation. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 p-4">
         <div className="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2 rounded-2xl bg-white/85 p-4 shadow-md ring-1 ring-black/5 backdrop-blur">
           <div className="flex items-center justify-between gap-3">
@@ -94,21 +102,22 @@ export default function ForestPage() {
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-emerald-100">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-lime-400 to-emerald-500 transition-all duration-500"
-                style={{ width: `${percent}%` }}
+                style={{ width: `${growthPercent}%` }}
               />
             </div>
             <span className="whitespace-nowrap text-sm font-medium text-emerald-700">
-              {stageLabel(progress)}
+              {stageLabel(done)}
             </span>
             <span className="whitespace-nowrap text-sm text-zinc-500">
-              {done}/{total}
+              🌳 {done} 本
             </span>
           </div>
 
           {loading && <p className="text-xs text-zinc-400">読み込み中…</p>}
           {note && <p className="text-xs text-amber-600">{note}</p>}
           <p className="text-xs text-zinc-500">
-            タスクを完了するほど緑が育ちます。10 タスクごとにレアな植物が芽生えます。
+            完了したタスクの数だけ緑が増えます（全 {total} 件）。10
+            件ごとにレアな植物が芽生えます。
           </p>
         </div>
       </div>

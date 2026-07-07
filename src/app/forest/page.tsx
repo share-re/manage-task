@@ -66,7 +66,7 @@ export default function ForestPage() {
   const percent = Math.round(progress * 100);
 
   return (
-    <main className="relative flex-1 overflow-hidden">
+    <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-sky-100">
       <Garden done={done} progress={progress} />
 
       {/* Overlay: title, progress, and navigation. */}

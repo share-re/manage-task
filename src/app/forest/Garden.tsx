@@ -69,5 +69,5 @@ export default function Garden({ done, progress }: Props) {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="block h-full w-full" />;
+  return <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />;
 }

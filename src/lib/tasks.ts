@@ -57,14 +57,26 @@ export async function createTask(input: NewTask): Promise<Task> {
   return data as Task;
 }
 
-/** Team-wide progress: how many tasks are done out of all tasks. */
+/**
+ * Team-wide progress based on leaf tasks only.
+ * A parent task (one that has children) is just a container, so counting it
+ * alongside its children would double-count. We count only tasks that are not
+ * the parent of any other task.
+ */
 export function taskProgress(tasks: Task[]): {
   done: number;
   total: number;
   percent: number;
 } {
-  const total = tasks.length;
-  const done = tasks.filter((t) => t.status === "done").length;
+  // 子タスクを持つ「親」のidを集める（＝どれかのタスクの parent_id になっているid）。
+  const parentIds = new Set(
+    tasks.map((t) => t.parent_id).filter((id): id is string => id !== null),
+  );
+  // 親でないタスク（末端）だけを進捗の対象にする。
+  const leafTasks = tasks.filter((t) => !parentIds.has(t.id));
+
+  const total = leafTasks.length;
+  const done = leafTasks.filter((t) => t.status === "done").length;
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   return { done, total, percent };
 }

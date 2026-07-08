@@ -171,6 +171,12 @@ export default function OfficePage() {
               >
                 🤖 内田さん
               </button>
+              <Link href="/tasks" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
+                ✅ 進捗管理
+              </Link>
+              <Link href="/tasks/mail" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
+                ✉️ メール
+              </Link>
               <Link href="/forest" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
                 🌱 植林
               </Link>

@@ -128,9 +128,17 @@ export default function TasksPage() {
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
-        <Link href="/" className="text-sm text-zinc-500 hover:underline">
-          ← トップに戻る
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/tasks/mail"
+            className="text-sm text-zinc-500 hover:underline"
+          >
+            メール共有の設定
+          </Link>
+          <Link href="/" className="text-sm text-zinc-500 hover:underline">
+            ← トップに戻る
+          </Link>
+        </div>
       </div>
 
       {/* Team-wide progress */}

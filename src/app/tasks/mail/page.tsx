@@ -31,6 +31,11 @@ export default function MailSettingsPage() {
   const [testMessage, setTestMessage] = useState<string>();
   const [testError, setTestError] = useState<string>();
 
+  // Send now: send the summary to the saved recipients immediately.
+  const [sendingNow, setSendingNow] = useState(false);
+  const [nowMessage, setNowMessage] = useState<string>();
+  const [nowError, setNowError] = useState<string>();
+
   useEffect(() => {
     if (session?.user.email && !testRecipient) {
       setTestRecipient(session.user.email);
@@ -58,6 +63,37 @@ export default function MailSettingsPage() {
       setTestError(err instanceof Error ? err.message : "送信に失敗しました。");
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function onSendNow() {
+    if (
+      !window.confirm(
+        "保存済みの送信先へ、進捗サマリを今すぐ送信します。よろしいですか？",
+      )
+    )
+      return;
+    setSendingNow(true);
+    setNowMessage(undefined);
+    setNowError(undefined);
+    try {
+      const res = await fetch("/api/send-summary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        // No testRecipient / no scheduled -> send to the saved recipients now.
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "送信に失敗しました。");
+      setNowMessage(`送信しました：${(data.sentTo ?? []).join(", ")}`);
+    } catch (err) {
+      console.error(err);
+      setNowError(err instanceof Error ? err.message : "送信に失敗しました。");
+    } finally {
+      setSendingNow(false);
     }
   }
 
@@ -247,6 +283,29 @@ export default function MailSettingsPage() {
           {testError && <p className="mt-2 text-sm text-red-600">{testError}</p>}
           {testMessage && (
             <p className="mt-2 text-sm text-green-700">{testMessage}</p>
+          )}
+        </div>
+      )}
+
+      {/* Send now: send to the saved recipients immediately (no schedule wait). */}
+      {loaded && (
+        <div className="mt-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
+          <h2 className="text-lg font-semibold text-zinc-800">今すぐ送信</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            スケジュールを待たず、<strong>保存済みの送信先</strong>
+            へ進捗サマリを今すぐ送ります。宛先を変えた場合は先に「保存する」を押してください。
+          </p>
+          <button
+            type="button"
+            onClick={onSendNow}
+            disabled={sendingNow}
+            className="mt-3 rounded-lg bg-zinc-900 px-5 py-2 font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {sendingNow ? "送信中…" : "今すぐ送信"}
+          </button>
+          {nowError && <p className="mt-2 text-sm text-red-600">{nowError}</p>}
+          {nowMessage && (
+            <p className="mt-2 text-sm text-green-700">{nowMessage}</p>
           )}
         </div>
       )}

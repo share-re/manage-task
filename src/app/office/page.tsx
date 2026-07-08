@@ -19,12 +19,21 @@ function growthFromDone(done: number): number {
   return 1 - Math.pow(0.85, done);
 }
 
+// Stable, distinct shirt color per user so teammates are told apart at a glance.
+function colorFromId(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+  return `hsl(${h} 60% 55%)`;
+}
+
 export default function OfficePage() {
   const { session } = useAuth();
+  const userId = session?.user.id ?? "guest";
   const playerName =
     (session?.user.user_metadata?.name as string | undefined) ??
     session?.user.email?.split("@")[0] ??
     "あなた";
+  const playerColor = colorFromId(userId);
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showTasks, setShowTasks] = useState(false);
@@ -76,7 +85,7 @@ export default function OfficePage() {
 
   return (
     <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-[#2b2430]">
-      <World progress={progress} playerName={playerName} />
+      <World progress={progress} playerName={playerName} userId={userId} playerColor={playerColor} />
 
       {/* Top overlay: title, progress, controls */}
       <div className="pointer-events-none absolute inset-x-0 top-0 p-4">

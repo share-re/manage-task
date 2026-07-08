@@ -12,6 +12,7 @@ import {
 } from "@/lib/tasks";
 import TaskPanel from "@/app/forest/TaskPanel";
 import World from "./World";
+import ChatPanel from "./ChatPanel";
 
 // Same saturating curve as the /forest view: completing tasks always adds green
 // and adding new (incomplete) tasks never removes any.
@@ -37,6 +38,7 @@ export default function OfficePage() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showTasks, setShowTasks] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [note, setNote] = useState<string>();
   const loadedRef = useRef(false);
 
@@ -101,6 +103,14 @@ export default function OfficePage() {
               >
                 📋 タスク
               </button>
+              <button
+                onClick={() => setShowChat((v) => !v)}
+                className={`rounded-lg px-3 py-1 text-sm font-semibold ${
+                  showChat ? "bg-emerald-600 text-white" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                }`}
+              >
+                🤖 内田さん
+              </button>
               <Link href="/forest" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
                 🌱 植林
               </Link>
@@ -122,6 +132,12 @@ export default function OfficePage() {
       {showTasks && (
         <div className="pointer-events-none absolute right-4 top-28 z-10">
           <TaskPanel tasks={tasks} onToggle={handleToggle} onClose={() => setShowTasks(false)} />
+        </div>
+      )}
+
+      {showChat && (
+        <div className="pointer-events-none absolute left-4 top-28 z-10">
+          <ChatPanel onClose={() => setShowChat(false)} />
         </div>
       )}
     </main>

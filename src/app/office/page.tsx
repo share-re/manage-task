@@ -124,6 +124,12 @@ export default function OfficePage() {
     cancelClose();
     closeTimer.current = window.setTimeout(() => setPicked(null), 160);
   };
+  // "近づくと開く": a station's panel opens while the player stands in it.
+  function handleStation(id: "task" | "uchida", near: boolean) {
+    if (id === "task") setShowTasks(near);
+    else if (id === "uchida") setShowChat(near);
+  }
+
   function handlePick(species: string | null, x: number, y: number) {
     if (species) {
       cancelClose();
@@ -147,6 +153,7 @@ export default function OfficePage() {
         playerColor={playerColor}
         weather={effectiveWeather}
         onPickPlant={handlePick}
+        onStationChange={handleStation}
       />
 
       {/* Top overlay: title, progress, controls */}
@@ -189,7 +196,7 @@ export default function OfficePage() {
             <kbd className="rounded bg-black/5 px-1">W</kbd>{" "}
             <kbd className="rounded bg-black/5 px-1">A</kbd>{" "}
             <kbd className="rounded bg-black/5 px-1">S</kbd>{" "}
-            <kbd className="rounded bg-black/5 px-1">D</kbd> か矢印キーで移動。完了タスクが増えるほどオフィスが森に育ちます（完了 {done} / 全 {total} 件）。
+            <kbd className="rounded bg-black/5 px-1">D</kbd> か矢印キーで移動。<b className="text-emerald-700">タスクボードや内田さんの席に近づく</b>とパネルが開きます🌟 完了が増えるほどオフィスが森に育ちます（完了 {done} / 全 {total} 件）。
           </p>
           {note && <p className="text-xs text-amber-600">{note}</p>}
         </div>

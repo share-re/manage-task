@@ -6,8 +6,10 @@ import {
   drawWorld,
   moveActor,
   treeAt,
+  STATIONS,
   type Actor,
   type Facing,
+  type StationId,
   type WorldState,
 } from "./officeWorld";
 import type { Weather } from "@/app/forest/weather";
@@ -19,6 +21,9 @@ type Props = {
   playerColor: string;
   weather: Weather;
   onPickPlant?: (species: string | null, x: number, y: number) => void;
+  // Fired when the player walks into / out of a station's radius, so the page
+  // can auto-open (or close) the matching panel — the "近づくと開く" HUD.
+  onStationChange?: (id: StationId, near: boolean) => void;
 };
 
 // What each client shares about itself over Realtime Presence.
@@ -36,22 +41,25 @@ type Remote = Actor & { tx: number; tz: number }; // tx/tz = interpolation targe
 
 const HAIR = "#4a3628";
 const AI: Actor = {
-  x: 11.2, z: 4.3, name: "AI内田さん", shirt: "#f0f1ec", hair: "#8d939c",
+  x: 11.1, z: 9.0, name: "AI内田さん", shirt: "#f0f1ec", hair: "#8d939c",
   face: "down", ph: 5, ai: true, glasses: true,
 };
 
-export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant }: Props) {
+export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
   const selfRef = useRef<Actor>({
-    x: 11, z: 10, name: playerName, shirt: playerColor, hair: HAIR, face: "down", ph: 0, self: true,
+    x: 11.1, z: 12.0, name: playerName, shirt: playerColor, hair: HAIR, face: "up", ph: 0, self: true,
   });
   const remotesRef = useRef<Map<string, Remote>>(new Map());
   const worldRef = useRef({ dispP: 0, targetP: 0 });
   const weatherRef = useRef<Weather>(weather);
+  const nearRef = useRef<Record<StationId, boolean>>({ task: false, uchida: false });
+  const onStationRef = useRef(onStationChange);
 
   useEffect(() => { worldRef.current.targetP = progress; }, [progress]);
   useEffect(() => { weatherRef.current = weather; }, [weather]);
+  useEffect(() => { onStationRef.current = onStationChange; });
   useEffect(() => { selfRef.current.name = playerName; selfRef.current.shirt = playerColor; }, [playerName, playerColor]);
 
   useEffect(() => {
@@ -144,6 +152,14 @@ export default function World({ progress, playerName, userId, playerColor, weath
         if (me.moving) {
           moveActor(me, dx * SPD * dt, dz * SPD * dt);
           me.face = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? "right" : "left") : dz > 0 ? "down" : "up";
+        }
+        // "近づくと開く": open/close a panel as the player enters/leaves a station.
+        for (const s of STATIONS) {
+          const inside = Math.hypot(me.x - s.x, me.z - s.z) < s.r;
+          if (inside !== nearRef.current[s.id]) {
+            nearRef.current[s.id] = inside;
+            onStationRef.current?.(s.id, inside);
+          }
         }
         // Interpolate remote players toward their latest known position.
         for (const r of remotesRef.current.values()) {

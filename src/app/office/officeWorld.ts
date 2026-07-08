@@ -1,7 +1,15 @@
 // Metaverse office renderer, ported/adapted from the training mock.
 // Framework-agnostic: page/World.tsx drive it through a WorldState ref so the
 // React tree never re-runs the animation loop. Progress (completed tasks) grows
-// the office into a forest, reusing the same idea as the /forest view.
+// the office into a forest, reusing the same plant species, rare plants and
+// weather as the /forest view.
+
+import {
+  COMMON_SPECIES,
+  RARE_SPECIES_LIST,
+  getSpecies,
+} from "@/app/forest/plants";
+import type { Weather } from "@/app/forest/weather";
 
 export const T = 52;
 export const COLS = 24;
@@ -12,18 +20,17 @@ export const MAPH = ROWS * T;
 export type Facing = "up" | "down" | "left" | "right";
 
 export type Actor = {
-  x: number; // tile coords
+  x: number;
   z: number;
   name: string;
   shirt: string;
   hair: string;
   face: Facing;
-  ph: number; // phase offset for the bob animation
+  ph: number;
   moving?: boolean;
-  self?: boolean; // the local player
-  ai?: boolean; // 内田さん (stationary NPC)
+  self?: boolean;
+  ai?: boolean;
   glasses?: boolean;
-  // bot wander state (placeholder others until realtime multiplayer lands)
   tx?: number;
   tz?: number;
   wait?: number;
@@ -33,7 +40,8 @@ export type Actor = {
 export type WorldState = {
   actors: Actor[];
   dispP: number; // smoothed progress 0..1, drives tree growth
-  targetP: number; // latest real progress 0..1
+  targetP: number;
+  weather: Weather;
 };
 
 type Furn = { type: string; x: number; y: number; w: number; h: number };
@@ -74,25 +82,42 @@ const ZONES = [
   { t: "カフェ", x: 21.2, y: 12.3 },
 ];
 
-// Points of interest the wandering bots stroll between.
 export const POIS = [
   { x: 5, y: 7.6 }, { x: 10.5, y: 5.3 }, { x: 14, y: 5.5 }, { x: 17, y: 5.5 },
   { x: 20, y: 5.5 }, { x: 4.8, y: 9.9 }, { x: 20.5, y: 11.9 }, { x: 10, y: 9 },
   { x: 8.5, y: 12.5 }, { x: 15, y: 10.5 }, { x: 12, y: 12.5 },
 ];
 
-// Trees appear as progress passes each threshold `s`.
-const TREES = [
+export function srand(i: number): number {
+  const s = Math.sin(i * 127.1) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+// Fixed tree slots; each is assigned a real species (every 5th is rare), reusing
+// the /forest species lists so the office grows into the same kind of forest.
+export type OfficeTree = {
+  x: number;
+  y: number;
+  s: number; // progress threshold at which it appears
+  species: string;
+  kind: "normal" | "rare";
+};
+const RAW_TREES = [
   { x: 1.9, y: 9.6, s: 0.1 }, { x: 22.1, y: 5.8, s: 0.1 }, { x: 11, y: 14.2, s: 0.2 },
   { x: 2.0, y: 7.0, s: 0.3 }, { x: 22.0, y: 10.6, s: 0.3 }, { x: 15, y: 13.9, s: 0.4 },
   { x: 9.6, y: 11.0, s: 0.5 }, { x: 6.9, y: 9.8, s: 0.5 }, { x: 18, y: 9.8, s: 0.6 },
   { x: 12.4, y: 2.7, s: 0.7 }, { x: 2.3, y: 2.9, s: 0.7 }, { x: 16.6, y: 2.7, s: 0.8 },
   { x: 21.4, y: 2.9, s: 0.9 }, { x: 5.6, y: 14.2, s: 0.9 }, { x: 13.4, y: 9.2, s: 1 },
 ];
+export const OFFICE_TREES: OfficeTree[] = RAW_TREES.map((tr, i) => {
+  const isRare = i % 5 === 4;
+  const list = isRare ? RARE_SPECIES_LIST : COMMON_SPECIES;
+  const sp = list[Math.floor(srand(i * 7.3) * list.length)];
+  return { ...tr, species: sp.key, kind: isRare ? "rare" : "normal" };
+});
 
-export function srand(i: number): number {
-  const s = Math.sin(i * 127.1) * 43758.5453;
-  return s - Math.floor(s);
+function treeGrow(tr: OfficeTree, dispP: number): number {
+  return Math.max(0, Math.min(1, (dispP - tr.s + 0.15) / 0.15));
 }
 
 const SKIN = "#ffd9b3";
@@ -101,12 +126,7 @@ const R = 0.32;
 export function blocked(x: number, z: number): boolean {
   if (x < 1.4 || x > COLS - 1.4 || z < 2.0 || z > ROWS - 1.5) return true;
   for (const f of FURN) {
-    if (
-      x > f.x - R &&
-      x < f.x + f.w + R &&
-      z > f.y - R * 0.7 &&
-      z < f.y + f.h + R * 0.7
-    )
+    if (x > f.x - R && x < f.x + f.w + R && z > f.y - R * 0.7 && z < f.y + f.h + R * 0.7)
       return true;
   }
   return false;
@@ -117,14 +137,34 @@ export function moveActor(a: Actor, dx: number, dz: number) {
   if (dz && !blocked(a.x, a.z + dz)) a.z += dz;
 }
 
-function rr(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-) {
+// Camera offset (top-left of the viewport in world pixels), following the player.
+export function cameraOffset(player: Actor | undefined, W: number, H: number) {
+  let ox = (player ? player.x * T : MAPW / 2) - W / 2;
+  let oy = (player ? player.z * T : MAPH / 2) - H / 2;
+  ox = MAPW <= W ? -(W - MAPW) / 2 : Math.max(0, Math.min(MAPW - W, ox));
+  oy = MAPH <= H ? -(H - MAPH) / 2 : Math.max(0, Math.min(MAPH - H, oy));
+  return { ox, oy };
+}
+
+// Which grown tree's canopy is under the screen point, if any (for tooltips).
+export function treeAt(
+  sx: number, sy: number, W: number, H: number, player: Actor | undefined, dispP: number,
+): OfficeTree | null {
+  const { ox, oy } = cameraOffset(player, W, H);
+  const wx = sx + ox, wy = sy + oy;
+  let hit: OfficeTree | null = null;
+  let best = 1e9;
+  for (const tr of OFFICE_TREES) {
+    if (treeGrow(tr, dispP) <= 0.05) continue;
+    const cx = tr.x * T;
+    const cy = tr.y * T - 34;
+    const d = Math.hypot(wx - cx, wy - cy);
+    if (d < 34 && d < best) { best = d; hit = tr; }
+  }
+  return hit;
+}
+
+function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   r = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -196,19 +236,34 @@ function drawFurn(ctx: CanvasRenderingContext2D, f: Furn) {
   }
 }
 
-function drawTree(ctx: CanvasRenderingContext2D, tr: { x: number; y: number; s: number }, t: number, dispP: number) {
-  const grow = Math.max(0, Math.min(1, (dispP - tr.s + 0.15) / 0.15));
+// Shift a hex color toward white by f (0..1), for lighter canopy layers.
+function lighten(hex: string, f: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const mix = (c: number) => Math.round(c + (255 - c) * f);
+  return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+}
+
+function drawTree(ctx: CanvasRenderingContext2D, tr: OfficeTree, t: number, dispP: number) {
+  const grow = treeGrow(tr, dispP);
   if (grow <= 0.01) return;
   const px = tr.x * T, py = tr.y * T;
   const s = grow * (0.85 + srand(tr.x * 7 + tr.y) * 0.3);
   const sway = Math.sin(t * 1.2 + tr.x * 3) * 2 * s;
+  const base = getSpecies(tr.species).color;
+
+  // Rare species get a soft golden aura so they stand out.
+  if (tr.kind === "rare") {
+    ctx.fillStyle = `rgba(240,200,90,${0.12 * grow})`;
+    ctx.beginPath(); ctx.arc(px, py - 40 * s, 34 * s, 0, 7); ctx.fill();
+  }
   ctx.fillStyle = "rgba(40,60,30,0.20)";
   ctx.beginPath(); ctx.ellipse(px, py + 3, 24 * s, 8 * s, 0, 0, 7); ctx.fill();
   ctx.fillStyle = "#7a5236";
   rr(ctx, px - 5 * s, py - 34 * s, 10 * s, 36 * s, 4 * s); ctx.fill();
-  const G = ["#3e7d46", "#4f9455", "#67ab68"];
+  const layers = [base, lighten(base, 0.12), lighten(base, 0.24)];
   for (let i = 0; i < 3; i++) {
-    ctx.fillStyle = G[i];
+    ctx.fillStyle = layers[i];
     ctx.beginPath();
     ctx.arc(px + sway * (i + 1) * 0.3, py - (38 + i * 16) * s, (26 - i * 5) * s, 0, 7);
     ctx.arc(px - 14 * s + sway * 0.2, py - (32 + i * 12) * s, (18 - i * 4) * s, 0, 7);
@@ -283,22 +338,29 @@ function drawChar(ctx: CanvasRenderingContext2D, a: Actor, t: number) {
   ctx.fillText(label, px, py + 17.5);
 }
 
-// Draw one frame. Returns nothing; camera follows the local player.
+// Weather-driven light over the whole scene ("日差し"): warm for clear skies,
+// a cool grey veil for cloud/rain/snow. Reuses the /forest Weather condition.
+function drawWeatherLight(ctx: CanvasRenderingContext2D, weather: Weather) {
+  if (weather === "clear") {
+    const g = ctx.createLinearGradient(0, 0, MAPW, MAPH);
+    g.addColorStop(0, "rgba(255,238,180,0.16)");
+    g.addColorStop(1, "rgba(255,236,180,0.04)");
+    ctx.fillStyle = g;
+  } else {
+    const veil = weather === "rain" ? 0.26 : weather === "snow" ? 0.14 : 0.16;
+    ctx.fillStyle = `rgba(120,128,140,${veil})`;
+  }
+  ctx.fillRect(0, 0, MAPW, MAPH);
+}
+
 export function drawWorld(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  H: number,
-  state: WorldState,
-  t: number,
+  ctx: CanvasRenderingContext2D, W: number, H: number, state: WorldState, t: number,
 ) {
   const player = state.actors.find((a) => a.self) ?? state.actors[0];
   ctx.fillStyle = "#2b2430";
   ctx.fillRect(0, 0, W, H);
 
-  let ox = (player ? player.x * T : MAPW / 2) - W / 2;
-  let oy = (player ? player.z * T : MAPH / 2) - H / 2;
-  ox = MAPW <= W ? -(W - MAPW) / 2 : Math.max(0, Math.min(MAPW - W, ox));
-  oy = MAPH <= H ? -(H - MAPH) / 2 : Math.max(0, Math.min(MAPH - H, oy));
+  const { ox, oy } = cameraOffset(player, W, H);
   ctx.save();
   ctx.translate(-ox, -oy);
 
@@ -316,7 +378,6 @@ export function drawWorld(
     }
   }
 
-  // Progress greenery patches on the floor
   if (state.dispP > 0.02) {
     for (let i = 0; i < 6; i++) {
       const gx = (2 + srand(i * 3 + 1) * 20) * T, gy = (3 + srand(i * 3 + 2) * 11) * T;
@@ -329,13 +390,11 @@ export function drawWorld(
     }
   }
 
-  // Rugs
   for (const g of RUGS) {
     ctx.fillStyle = g.c;
     rr(ctx, g.x * T, g.y * T, g.w * T, g.h * T, 18); ctx.fill();
   }
 
-  // Zone labels
   ctx.font = "700 13px sans-serif";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   for (const z of ZONES) {
@@ -343,7 +402,6 @@ export function drawWorld(
     ctx.fillText(z.t, z.x * T, z.y * T);
   }
 
-  // Walls
   ctx.fillStyle = "#5f4c3f";
   ctx.fillRect(0, 0, MAPW, T * 1.4);
   ctx.fillRect(0, MAPH - T, MAPW, T);
@@ -351,7 +409,6 @@ export function drawWorld(
   ctx.fillRect(MAPW - T, 0, T, MAPH);
   ctx.fillStyle = "#7b6353";
   ctx.fillRect(T * 0.15, T * 0.12, MAPW - T * 0.3, T * 1.1);
-  // Moss creeps in as the office turns green
   const moss = Math.max(0, state.dispP - 0.3) * 0.45;
   if (moss > 0.01) {
     ctx.fillStyle = `rgba(70,130,60,${moss})`;
@@ -361,18 +418,17 @@ export function drawWorld(
     ctx.fillRect(MAPW - T, 0, T, MAPH);
   }
 
-  // Furniture + trees + characters, back-to-front by depth
   const items = [
     ...FURN.map((f) => ({ key: (f.y + f.h) * T, draw: () => drawFurn(ctx, f) })),
-    ...TREES.map((tr) => ({ key: tr.y * T + 4, draw: () => drawTree(ctx, tr, t, state.dispP) })),
+    ...OFFICE_TREES.map((tr) => ({ key: tr.y * T + 4, draw: () => drawTree(ctx, tr, t, state.dispP) })),
     ...state.actors.map((a) => ({ key: a.z * T + 6, draw: () => drawChar(ctx, a, t) })),
   ].sort((a, b) => a.key - b.key);
   for (const it of items) it.draw();
 
-  // Whole-scene green tint as the forest fills in
   if (state.dispP > 0.02) {
     ctx.fillStyle = `rgba(90,160,90,${state.dispP * 0.07})`;
     ctx.fillRect(0, 0, MAPW, MAPH);
   }
+  drawWeatherLight(ctx, state.weather);
   ctx.restore();
 }

@@ -5,16 +5,20 @@ import { supabase } from "@/lib/supabase";
 import {
   drawWorld,
   moveActor,
+  treeAt,
   type Actor,
   type Facing,
   type WorldState,
 } from "./officeWorld";
+import type { Weather } from "@/app/forest/weather";
 
 type Props = {
   progress: number; // 0..1 target greenery from real completed tasks
   playerName: string;
   userId: string;
   playerColor: string;
+  weather: Weather;
+  onPickPlant?: (species: string | null, x: number, y: number) => void;
 };
 
 // What each client shares about itself over Realtime Presence.
@@ -36,7 +40,7 @@ const AI: Actor = {
   face: "down", ph: 5, ai: true, glasses: true,
 };
 
-export default function World({ progress, playerName, userId, playerColor }: Props) {
+export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
   const selfRef = useRef<Actor>({
@@ -44,8 +48,10 @@ export default function World({ progress, playerName, userId, playerColor }: Pro
   });
   const remotesRef = useRef<Map<string, Remote>>(new Map());
   const worldRef = useRef({ dispP: 0, targetP: 0 });
+  const weatherRef = useRef<Weather>(weather);
 
   useEffect(() => { worldRef.current.targetP = progress; }, [progress]);
+  useEffect(() => { weatherRef.current = weather; }, [weather]);
   useEffect(() => { selfRef.current.name = playerName; selfRef.current.shirt = playerColor; }, [playerName, playerColor]);
 
   useEffect(() => {
@@ -159,6 +165,7 @@ export default function World({ progress, playerName, userId, playerColor }: Pro
         const state: WorldState = {
           dispP: worldRef.current.dispP,
           targetP: worldRef.current.targetP,
+          weather: weatherRef.current,
           actors: [me, AI, ...remotesRef.current.values()],
         };
         drawWorld(ctx!, w, h, state, now / 1000);
@@ -185,7 +192,24 @@ export default function World({ progress, playerName, userId, playerColor }: Pro
 
   return (
     <div className="absolute inset-0">
-      <canvas ref={canvasRef} className="h-full w-full touch-none" />
+      <canvas
+        ref={canvasRef}
+        className="h-full w-full touch-none"
+        onPointerMove={(e) => {
+          if (e.pointerType !== "mouse" || !onPickPlant) return;
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const rect = canvas.getBoundingClientRect();
+          const tr = treeAt(
+            e.clientX - rect.left, e.clientY - rect.top,
+            canvas.clientWidth, canvas.clientHeight,
+            selfRef.current, worldRef.current.dispP,
+          );
+          e.currentTarget.style.cursor = tr ? "pointer" : "default";
+          onPickPlant(tr ? tr.species : null, e.clientX, e.clientY);
+        }}
+        onPointerLeave={() => onPickPlant?.(null, 0, 0)}
+      />
       <div className="pointer-events-none absolute bottom-5 right-5 grid grid-cols-3 grid-rows-2 gap-2 md:hidden">
         <span />
         <button className={`pointer-events-auto ${padBtn}`} onPointerDown={hold("w", true)} onPointerUp={hold("w", false)} onPointerLeave={hold("w", false)}>▲</button>

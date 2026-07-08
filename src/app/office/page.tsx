@@ -11,6 +11,9 @@ import {
   type Task,
 } from "@/lib/tasks";
 import TaskPanel from "@/app/forest/TaskPanel";
+import PlantTooltip from "@/app/forest/PlantTooltip";
+import { RARE_SPECIES_LIST, type Plant } from "@/app/forest/plants";
+import { fetchWeather, type Weather } from "@/app/forest/weather";
 import World from "./World";
 import ChatPanel from "./ChatPanel";
 
@@ -41,6 +44,18 @@ export default function OfficePage() {
   const [showChat, setShowChat] = useState(false);
   const [note, setNote] = useState<string>();
   const loadedRef = useRef(false);
+
+  // Real weather (reused from /forest); "?weather=clear|clouds|rain|snow" forces one.
+  const [weather, setWeather] = useState<Weather>("clear");
+  const [demoWeather] = useState<Weather | null>(() => {
+    if (typeof window === "undefined") return null;
+    const wq = new URLSearchParams(window.location.search).get("weather");
+    return wq === "clear" || wq === "clouds" || wq === "rain" || wq === "snow" ? wq : null;
+  });
+
+  // Plant detail tooltip on hovering a tree (reuses /forest PlantTooltip + wiki).
+  const [picked, setPicked] = useState<{ plant: Plant; x: number; y: number } | null>(null);
+  const closeTimer = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -82,12 +97,57 @@ export default function OfficePage() {
     }
   }
 
+  // Fetch real weather (falls back to Tokyo); skipped when "?weather=" forces one.
+  useEffect(() => {
+    if (demoWeather !== null) return;
+    let active = true;
+    let coords = { lat: 35.68, lon: 139.69 };
+    const run = () =>
+      fetchWeather(coords.lat, coords.lon)
+        .then((w) => { if (active) setWeather(w); })
+        .catch(() => {});
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { coords = { lat: pos.coords.latitude, lon: pos.coords.longitude }; run(); },
+        () => run(),
+        { timeout: 8000 },
+      );
+    } else run();
+    const id = setInterval(run, 600_000);
+    return () => { active = false; clearInterval(id); };
+  }, [demoWeather]);
+
+  const cancelClose = () => {
+    if (closeTimer.current !== null) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => setPicked(null), 160);
+  };
+  function handlePick(species: string | null, x: number, y: number) {
+    if (species) {
+      cancelClose();
+      const isRare = RARE_SPECIES_LIST.some((s) => s.key === species);
+      setPicked({ plant: { id: 0, kind: isRare ? "rare" : "normal", species, x: 0, y: 0 }, x, y });
+    } else {
+      scheduleClose();
+    }
+  }
+
   const { done, total } = taskProgress(tasks);
   const progress = growthFromDone(done);
+  const effectiveWeather = demoWeather ?? weather;
 
   return (
     <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-[#2b2430]">
-      <World progress={progress} playerName={playerName} userId={userId} playerColor={playerColor} />
+      <World
+        progress={progress}
+        playerName={playerName}
+        userId={userId}
+        playerColor={playerColor}
+        weather={effectiveWeather}
+        onPickPlant={handlePick}
+      />
 
       {/* Top overlay: title, progress, controls */}
       <div className="pointer-events-none absolute inset-x-0 top-0 p-4">
@@ -139,6 +199,18 @@ export default function OfficePage() {
         <div className="pointer-events-none absolute left-4 top-28 z-10">
           <ChatPanel userName={playerName} onClose={() => setShowChat(false)} />
         </div>
+      )}
+
+      {picked && (
+        <PlantTooltip
+          key={picked.plant.species}
+          plant={picked.plant}
+          x={picked.x}
+          y={picked.y}
+          onKeepOpen={cancelClose}
+          onRequestClose={scheduleClose}
+          onClose={() => setPicked(null)}
+        />
       )}
     </main>
   );

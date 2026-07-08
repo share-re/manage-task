@@ -72,9 +72,14 @@ export function buildProgressSummary(
     if (t.status === "done") cur.done += 1;
     byAssignee.set(key, cur);
   }
-  const assignees = [...byAssignee.entries()].sort((a, b) =>
-    a[0] === "担当者なし" ? 1 : b[0] === "担当者なし" ? -1 : a[0].localeCompare(b[0]),
-  );
+  // Order: "全員" first, "担当者なし" last, everyone else by name.
+  const rank = (name: string) =>
+    name === "全員" ? 0 : name === "担当者なし" ? 2 : 1;
+  const assignees = [...byAssignee.entries()].sort((a, b) => {
+    const ra = rank(a[0]);
+    const rb = rank(b[0]);
+    return ra !== rb ? ra - rb : a[0].localeCompare(b[0]);
+  });
 
   const appUrl = process.env.APP_URL ?? "https://manage-task-drab.vercel.app";
 
@@ -106,7 +111,6 @@ export function buildProgressSummary(
       textLines.push(`      ・${t.title}（担当: ${assigneeName(t.assignee)}）`);
   }
   textLines.push("", "■ 担当者別の進捗");
-  textLines.push(`   全員   ${done} / ${total} 完了（${percent}%）`);
   for (const [name, c] of assignees) {
     const p = c.total === 0 ? 0 : Math.round((c.done / c.total) * 100);
     textLines.push(`   ${name}   ${c.done} / ${c.total} 完了（${p}%）`);
@@ -138,14 +142,12 @@ export function buildProgressSummary(
       <p style="margin:4px 0;">＋ 新しく追加: <strong>${added.length}</strong>件</p>
       <ul style="margin:0;padding-left:20px;">${added.map((t) => `<li>${esc(t.title)}（担当: ${esc(assigneeName(t.assignee))}）</li>`).join("")}</ul>`;
   }
-  const assigneeHtml =
-    `<li>全員: <strong>${done} / ${total}</strong> 完了（${percent}%）</li>` +
-    assignees
-      .map(([name, c]) => {
-        const p = c.total === 0 ? 0 : Math.round((c.done / c.total) * 100);
-        return `<li>${esc(name)}: <strong>${c.done} / ${c.total}</strong> 完了（${p}%）</li>`;
-      })
-      .join("");
+  const assigneeHtml = assignees
+    .map(([name, c]) => {
+      const p = c.total === 0 ? 0 : Math.round((c.done / c.total) * 100);
+      return `<li>${esc(name)}: <strong>${c.done} / ${c.total}</strong> 完了（${p}%）</li>`;
+    })
+    .join("");
 
   const html = `
     <div style="font-family: system-ui, sans-serif; color: #1f2937; line-height:1.6;">

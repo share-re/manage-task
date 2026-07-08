@@ -185,10 +185,12 @@ export default function World({ progress, playerName, userId, playerColor, weath
         // Grow the office into a forest toward the real progress.
         worldRef.current.dispP += (worldRef.current.targetP - worldRef.current.dispP) * Math.min(1, dt * 2);
 
+        const clock = new Date();
         const state: WorldState = {
           dispP: worldRef.current.dispP,
           targetP: worldRef.current.targetP,
           weather: weatherRef.current,
+          hour: clock.getHours() + clock.getMinutes() / 60,
           actors: [me, AI, ...remotesRef.current.values()],
         };
         drawWorld(ctx!, w, h, state, now / 1000);

@@ -55,6 +55,7 @@ export type WorldState = {
   dispP: number;
   targetP: number;
   weather: Weather;
+  hour: number; // local time of day (0..24) for the window sun/sky
 };
 
 type Furn = { type: string; x: number; y: number; w: number; h: number; zk?: number };
@@ -136,16 +137,20 @@ export function moveActor(a: Actor, dx: number, dz: number) {
   if (dz && !blocked(a.x, a.z + dz)) a.z += dz;
 }
 
-export function cameraOffset(player: Actor | undefined, W: number, H: number) {
-  let ox = (player ? player.x * T : MAPW / 2) - W / 2;
-  let oy = (player ? player.z * T : MAPH / 2) - H / 2;
-  ox = MAPW <= W ? -(W - MAPW) / 2 : Math.max(0, Math.min(MAPW - W, ox));
-  oy = MAPH <= H ? -(H - MAPH) / 2 : Math.max(0, Math.min(MAPH - H, oy));
-  return { ox, oy };
+// Scale the fixed map to always COVER the viewport (no dark margins on any
+// window size); the camera then follows the player within it.
+export function viewTransform(player: Actor | undefined, W: number, H: number) {
+  const scale = Math.max(W / MAPW, H / MAPH);
+  const vw = W / scale, vh = H / scale;
+  let ox = (player ? player.x * T : MAPW / 2) - vw / 2;
+  let oy = (player ? player.z * T : MAPH / 2) - vh / 2;
+  ox = Math.max(0, Math.min(MAPW - vw, ox));
+  oy = Math.max(0, Math.min(MAPH - vh, oy));
+  return { scale, ox, oy };
 }
 export function treeAt(sx: number, sy: number, W: number, H: number, player: Actor | undefined, dispP: number): OfficeTree | null {
-  const { ox, oy } = cameraOffset(player, W, H);
-  const wx = sx + ox, wy = sy + oy;
+  const { scale, ox, oy } = viewTransform(player, W, H);
+  const wx = sx / scale + ox, wy = sy / scale + oy;
   let hit: OfficeTree | null = null, best = 1e9;
   for (const tr of OFFICE_TREES) {
     if (treeGrow(tr, dispP) <= 0.05) continue;
@@ -393,12 +398,62 @@ function drawWeatherLight(ctx: CanvasRenderingContext2D, weather: Weather) {
   ctx.fillRect(0, 0, MAPW, MAPH);
 }
 
+// The view out of a window: sky tinted by the real weather + time of day, with
+// the sun/moon tracking the clock, weather particles, and a distant forest that
+// grows with progress.
+function drawWindowSky(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, hh: number, weather: Weather, hour: number, dispP: number) {
+  ctx.save();
+  rr(ctx, x, y, w, hh, 4); ctx.clip();
+  const night = hour < 5 ? 1 : hour < 7 ? (7 - hour) / 2 : hour > 20 ? 1 : hour > 18 ? (hour - 18) / 2 : 0;
+  const day: Record<Weather, [number[], number[]]> = {
+    clear: [[120, 200, 235], [192, 226, 236]],
+    clouds: [[150, 165, 180], [198, 208, 214]],
+    rain: [[92, 102, 116], [132, 142, 152]],
+    snow: [[198, 208, 218], [226, 232, 238]],
+  };
+  const [top, bot] = day[weather];
+  const nt = [22, 28, 52], nb = [40, 50, 74];
+  const mix = (a: number[], b: number[], f: number) =>
+    `rgb(${Math.round(a[0] + (b[0] - a[0]) * f)},${Math.round(a[1] + (b[1] - a[1]) * f)},${Math.round(a[2] + (b[2] - a[2]) * f)})`;
+  const g = ctx.createLinearGradient(0, y, 0, y + hh);
+  g.addColorStop(0, mix(top, nt, night)); g.addColorStop(1, mix(bot, nb, night));
+  ctx.fillStyle = g; ctx.fillRect(x, y, w, hh);
+  // Sun (day) / moon (night) tracking the hour left→right.
+  const f = Math.max(0, Math.min(1, (hour - 6) / 12));
+  const cx = x + f * w, cy = y + hh * 0.28 + (1 - Math.sin(f * Math.PI)) * hh * 0.44;
+  if (weather !== "rain") {
+    ctx.fillStyle = night > 0.5 ? "rgba(240,240,220,0.95)" : "rgba(255,226,120,0.98)";
+    ctx.beginPath(); ctx.arc(cx, cy, night > 0.5 ? 5.5 : 7, 0, 7); ctx.fill();
+  }
+  if (dispP > 0.3) {
+    ctx.fillStyle = `rgba(70,140,80,${Math.min(0.9, dispP)})`;
+    ctx.beginPath();
+    ctx.arc(x + w * 0.2, y + hh * 0.9, 12 * dispP + 4, 0, 7);
+    ctx.arc(x + w * 0.5, y + hh * 0.96, 15 * dispP + 4, 0, 7);
+    ctx.arc(x + w * 0.8, y + hh * 0.9, 11 * dispP + 4, 0, 7);
+    ctx.fill();
+  }
+  if (weather === "clouds" || weather === "rain") {
+    ctx.fillStyle = "rgba(255,255,255,0.72)";
+    for (let i = 0; i < 3; i++) { const ccx = x + w * (0.22 + i * 0.3); ctx.beginPath(); ctx.arc(ccx, y + hh * 0.32, 8, 0, 7); ctx.arc(ccx + 9, y + hh * 0.34, 6, 0, 7); ctx.fill(); }
+  }
+  if (weather === "rain") {
+    ctx.strokeStyle = "rgba(210,225,255,0.55)"; ctx.lineWidth = 1;
+    for (let i = 0; i < 14; i++) { const rx = x + ((i * 37) % w), ry = y + ((i * 23) % hh); ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 3, ry + 8); ctx.stroke(); }
+  }
+  if (weather === "snow") {
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    for (let i = 0; i < 14; i++) { ctx.beginPath(); ctx.arc(x + ((i * 41) % w), y + ((i * 29) % hh), 1.7, 0, 7); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
 export function drawWorld(ctx: CanvasRenderingContext2D, W: number, H: number, state: WorldState, t: number) {
   const player = state.actors.find((a) => a.self) ?? state.actors[0];
   const dispP = state.dispP;
   ctx.fillStyle = "#241d28"; ctx.fillRect(0, 0, W, H);
-  const { ox, oy } = cameraOffset(player, W, H);
-  ctx.save(); ctx.translate(-ox, -oy);
+  const { scale, ox, oy } = viewTransform(player, W, H);
+  ctx.save(); ctx.scale(scale, scale); ctx.translate(-ox, -oy);
 
   // Floor with subtle plank lines
   ctx.fillStyle = "#e3b884"; ctx.fillRect(0, 0, MAPW, MAPH);
@@ -452,14 +507,15 @@ export function drawWorld(ctx: CanvasRenderingContext2D, W: number, H: number, s
     ctx.fillStyle = `rgba(80,145,70,${0.5 + srand(i) * 0.3})`;
     for (let j = 0; j < len; j++) { ctx.beginPath(); ctx.arc(vx + Math.sin(j * 1.3 + i) * 4, T * 1.35 + j * 9, 4.5 - j * 0.25, 0, 7); ctx.fill(); }
   }
-  // Windows
-  for (const wx of [12.6, 15.6]) {
+  // Windows — the real outside view (weather + sun), so you can check it from
+  // inside. A few along the top wall so one is usually in view.
+  for (const wx of [6.0, 12.6, 15.6]) {
     const x = wx * T, y = T * 0.28, w = 2.2 * T, hh = T * 0.78;
     ctx.fillStyle = "#4a3a2f"; rr(ctx, x - 4, y - 4, w + 8, hh + 8, 6); ctx.fill();
-    const sky = ctx.createLinearGradient(0, y, 0, y + hh); sky.addColorStop(0, "#aedef7"); sky.addColorStop(1, "#d8f0dc");
-    ctx.fillStyle = sky; rr(ctx, x, y, w, hh, 4); ctx.fill();
-    if (dispP > 0.3) { ctx.fillStyle = `rgba(70,140,80,${Math.min(0.9, dispP)})`; ctx.beginPath(); ctx.arc(x + w * 0.2, y + hh * 0.8, 12 * dispP + 4, 0, 7); ctx.arc(x + w * 0.5, y + hh * 0.85, 15 * dispP + 4, 0, 7); ctx.arc(x + w * 0.8, y + hh * 0.78, 11 * dispP + 4, 0, 7); ctx.fill(); }
-    ctx.strokeStyle = "#4a3a2f"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + hh); ctx.stroke();
+    drawWindowSky(ctx, x, y, w, hh, state.weather, state.hour, dispP);
+    ctx.strokeStyle = "#4a3a2f"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + hh); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, y + hh / 2); ctx.lineTo(x + w, y + hh / 2); ctx.stroke();
   }
   // Whiteboard
   { const x = 3 * T, y = T * 0.25, w = 3.4 * T, hh = T * 0.85;

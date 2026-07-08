@@ -143,6 +143,9 @@ export default function OfficePage() {
   const { done, total } = taskProgress(tasks);
   const progress = growthFromDone(done);
   const effectiveWeather = demoWeather ?? weather;
+  const weatherIcon =
+    effectiveWeather === "rain" ? "🌧️" : effectiveWeather === "snow" ? "❄️" : effectiveWeather === "clouds" ? "☁️" : "☀️";
+  const navLink = "rounded-full px-2 py-1 text-sm leading-none hover:bg-[rgba(47,158,119,0.12)]";
 
   return (
     <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-[#2b2430]">
@@ -156,49 +159,43 @@ export default function OfficePage() {
         onStationChange={handleStation}
       />
 
-      {/* Top overlay: title, progress, controls */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 p-4">
-        <div className="pointer-events-auto mx-auto flex max-w-3xl flex-col gap-2 rounded-2xl bg-white/85 p-4 shadow-md ring-1 ring-black/5 backdrop-blur">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-lg font-bold text-emerald-800">🏢 バーチャルオフィス</h1>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowTasks((v) => !v)}
-                className={`rounded-lg px-3 py-1 text-sm font-semibold ${
-                  showTasks ? "bg-emerald-600 text-white" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                }`}
-              >
-                📋 タスク
-              </button>
-              <button
-                onClick={() => setShowChat((v) => !v)}
-                className={`rounded-lg px-3 py-1 text-sm font-semibold ${
-                  showChat ? "bg-emerald-600 text-white" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                }`}
-              >
-                🤖 内田さん
-              </button>
-              <Link href="/tasks" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
-                ✅ 進捗管理
-              </Link>
-              <Link href="/tasks/mail" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
-                ✉️ メール
-              </Link>
-              <Link href="/forest" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
-                🌱 植林
-              </Link>
-              <Link href="/" className="rounded-lg px-3 py-1 text-sm text-zinc-600 hover:bg-zinc-100">
-                ← トップ
-              </Link>
-            </div>
-          </div>
-          <p className="text-xs text-zinc-500">
-            <kbd className="rounded bg-black/5 px-1">W</kbd>{" "}
-            <kbd className="rounded bg-black/5 px-1">A</kbd>{" "}
-            <kbd className="rounded bg-black/5 px-1">S</kbd>{" "}
-            <kbd className="rounded bg-black/5 px-1">D</kbd> か矢印キーで移動。<b className="text-emerald-700">タスクボードや内田さんの席に近づく</b>とパネルが開きます🌟 完了が増えるほどオフィスが森に育ちます（完了 {done} / 全 {total} 件）。
+      {/* Top-left: compact title + station toggles */}
+      <div className="pointer-events-none absolute left-3 top-3 max-w-[min(92vw,290px)]">
+        <div className="pointer-events-auto rounded-2xl bg-[rgba(255,253,248,0.92)] p-3 shadow-lg ring-1 ring-[rgba(120,90,60,0.15)] backdrop-blur">
+          <h1 className="text-sm font-bold text-[#4a3b2f]">
+            <span className="mr-1 text-[#2f9e77]">◆</span>バーチャルオフィス
+          </h1>
+          <p className="mt-1 text-[11px] leading-relaxed text-[#a08a76]">
+            <kbd className="rounded bg-black/5 px-1">WASD</kbd>/矢印で移動。
+            <b className="text-[#4a3b2f]">ステーションに近づく</b>とパネルが開きます🌟（完了 {done}/{total}）
           </p>
-          {note && <p className="text-xs text-amber-600">{note}</p>}
+          <div className="mt-2 flex gap-1.5">
+            <button
+              onClick={() => setShowTasks((v) => !v)}
+              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showTasks ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
+            >
+              📋 進捗
+            </button>
+            <button
+              onClick={() => setShowChat((v) => !v)}
+              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showChat ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
+            >
+              🤖 内田さん
+            </button>
+          </div>
+          {note && <p className="mt-2 text-[11px] text-amber-600">{note}</p>}
+        </div>
+      </div>
+
+      {/* Top-right: weather + compact page nav (icons) */}
+      <div className="pointer-events-none absolute right-3 top-3">
+        <div className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-[rgba(255,253,248,0.92)] px-2 py-1 text-[#4a3b2f] shadow-lg ring-1 ring-[rgba(120,90,60,0.15)] backdrop-blur">
+          <span title={`天気: ${effectiveWeather}`} className="px-1 text-sm">{weatherIcon}</span>
+          <span className="mx-0.5 h-4 w-px bg-black/10" />
+          <Link href="/tasks" title="進捗管理" className={navLink}>✅</Link>
+          <Link href="/tasks/mail" title="メール" className={navLink}>✉️</Link>
+          <Link href="/forest" title="植林" className={navLink}>🌱</Link>
+          <Link href="/" title="トップ" className={navLink}>🏠</Link>
         </div>
       </div>
 

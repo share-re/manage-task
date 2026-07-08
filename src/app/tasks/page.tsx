@@ -209,7 +209,16 @@ export default function TasksPage() {
   const [filterStatus, setFilterStatus] = useState<"" | TaskStatus>("");
   const [sortKey, setSortKey] = useState<SortKey>("default");
 
+  // Today's date (YYYY-MM-DD, local) — the earliest allowed due date. Set in an
+  // effect to avoid a server/client hydration mismatch.
+  const [minDate, setMinDate] = useState("");
+
   useEffect(() => {
+    const now = new Date();
+    setMinDate(
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+    );
+
     listTasks()
       .then(setTasks)
       .catch((err) => {
@@ -230,8 +239,13 @@ export default function TasksPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
     setError(undefined);
+    // Reject past due dates (the picker also blocks them via min=today).
+    if (dueDate && minDate && dueDate < minDate) {
+      setError("期限に過去の日付は指定できません。");
+      return;
+    }
+    setSaving(true);
     try {
       if (bulkMode) {
         // Indented lines (leading space/tab/full-width space) become children of
@@ -608,6 +622,7 @@ export default function TasksPage() {
               <input
                 type="date"
                 value={dueDate}
+                min={minDate || undefined}
                 onChange={(e) => setDueDate(e.target.value)}
                 className={inputClass}
               />

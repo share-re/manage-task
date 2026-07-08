@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 
 // 内田さん is a stationary NPC in the office; talking to them happens here.
 //
-// Replies are rule-based for now so this works self-contained. To use the real
-// AI, merge the assistant feature (PR #6, Gemini) and set GEMINI_API_KEY, then
-// point `reply()` at POST /api/assistant instead of the local rules below.
+// Replies come from the real assistant at POST /api/assistant (Gemini, PR #6) —
+// a streaming text/plain response. If that route is absent (PR #6 not merged) or
+// errors (e.g. GEMINI_API_KEY unset), we fall back to the rule-based replies so
+// the office always works. Once PR #6 lands on main and the key is set, real AI
+// turns on automatically with no further change here.
 
 type Msg = { from: "me" | "ai"; text: string };
 
@@ -24,16 +26,23 @@ const DEFAULTS = [
   "一度深呼吸☕ 問題を声に出して説明してみて。案外そこで自分で気づけるものだよ。",
 ];
 
-function reply(q: string, n: number): string {
+function ruleReply(q: string, n: number): string {
   const hit = RULES.find(([re]) => re.test(q));
   return hit ? hit[1] : DEFAULTS[n % DEFAULTS.length];
 }
 
-export default function ChatPanel({ onClose }: { onClose: () => void }) {
+export default function ChatPanel({
+  userName,
+  onClose,
+}: {
+  userName: string;
+  onClose: () => void;
+}) {
   const [msgs, setMsgs] = useState<Msg[]>([
     { from: "ai", text: "こんにちは！AIメンターの内田です。研修で詰まったら何でも聞いてね💡" },
   ]);
   const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
   const countRef = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -41,14 +50,65 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [msgs]);
 
-  function send(e: React.FormEvent) {
+  async function send(e: React.FormEvent) {
     e.preventDefault();
     const q = input.trim();
-    if (!q) return;
+    if (!q || busy) return;
     setInput("");
+    setBusy(true);
+
+    // History for the API starts at the first user turn (Gemini rejects a
+    // history that begins with a model turn, e.g. our greeting).
+    const firstMe = msgs.findIndex((m) => m.from === "me");
+    const history =
+      firstMe === -1
+        ? []
+        : msgs.slice(firstMe).map((m) => ({
+            role: m.from === "me" ? "user" : "model",
+            text: m.text,
+          }));
+
     setMsgs((m) => [...m, { from: "me", text: q }]);
-    const ans = reply(q, countRef.current++);
-    window.setTimeout(() => setMsgs((m) => [...m, { from: "ai", text: ans }]), 500);
+
+    try {
+      const res = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: q, history, userName }),
+      });
+      const ct = res.headers.get("Content-Type") ?? "";
+      if (!res.ok || !res.body || !ct.startsWith("text/plain")) {
+        throw new Error("assistant unavailable");
+      }
+      // Stream the reply into a growing "ai" message.
+      setMsgs((m) => [...m, { from: "ai", text: "" }]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setMsgs((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = { from: "ai", text: acc };
+          return copy;
+        });
+      }
+      if (!acc.trim()) {
+        setMsgs((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = { from: "ai", text: ruleReply(q, countRef.current++) };
+          return copy;
+        });
+      }
+    } catch {
+      // Fall back to a rule-based reply so the office is never dead.
+      const ans = ruleReply(q, countRef.current++);
+      setMsgs((m) => [...m, { from: "ai", text: ans }]);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -67,7 +127,7 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
                 : "self-end rounded-xl bg-zinc-100 px-3 py-2 text-sm text-zinc-800"
             }
           >
-            {m.text}
+            {m.text || "…"}
           </div>
         ))}
       </div>
@@ -78,11 +138,14 @@ export default function ChatPanel({ onClose }: { onClose: () => void }) {
           placeholder="困ったことを聞いてみよう…"
           className="min-w-0 flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
-        <button type="submit" className="rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-white hover:bg-emerald-600">送信</button>
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+        >
+          {busy ? "…" : "送信"}
+        </button>
       </form>
-      <p className="mt-2 text-[11px] text-zinc-400">
-        ※現在はルールベース応答。実AI（Gemini/PR #6）に差し替え予定。
-      </p>
     </div>
   );
 }

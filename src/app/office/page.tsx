@@ -137,7 +137,7 @@ export default function OfficePage() {
 
       {showChat && (
         <div className="pointer-events-none absolute left-4 top-28 z-10">
-          <ChatPanel onClose={() => setShowChat(false)} />
+          <ChatPanel userName={playerName} onClose={() => setShowChat(false)} />
         </div>
       )}
     </main>

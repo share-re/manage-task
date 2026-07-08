@@ -17,7 +17,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (loading) return;
     if (!session && !isPublic) router.replace("/login");
-    if (session && isPublic) router.replace("/");
+    if (session && isPublic) router.replace("/office");
   }, [loading, session, isPublic, router]);
 
   if (loading) {

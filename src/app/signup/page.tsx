@@ -32,7 +32,7 @@ export default function SignupPage() {
     // When email confirmation is disabled, a session is returned right away.
     // Otherwise the user must confirm via the email link before logging in.
     if (data.session) {
-      router.replace("/");
+      router.replace("/office");
       return;
     }
     setMessage(

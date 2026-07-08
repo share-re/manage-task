@@ -386,7 +386,16 @@ export default function TasksPage() {
   }, [tasks, filterAssignee, filterStatus, sortKey]);
 
   const tree = useMemo(() => buildTaskTree(tasks), [tasks]);
-  const progress = taskProgress(tasks);
+  // Progress tracks the assignee filter: pick a person to see just their
+  // progress, or "すべて" for the whole team. (Status filter is intentionally
+  // ignored here — filtering to "done" would always read 100%.)
+  const progressScope = filterAssignee
+    ? tasks.filter((t) => (t.assignee || "") === filterAssignee)
+    : tasks;
+  const progress = taskProgress(progressScope);
+  const progressLabel = filterAssignee
+    ? `${filterAssignee} の進捗`
+    : "チーム全体の進捗";
 
   const renderRow = (
     task: Task,
@@ -430,7 +439,7 @@ export default function TasksPage() {
       <div className="mb-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold text-zinc-800">
-            チーム全体の進捗
+            {progressLabel}
           </h2>
           <span className="text-sm text-zinc-500">
             完了 {progress.done} / {progress.total}

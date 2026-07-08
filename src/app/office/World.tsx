@@ -6,6 +6,7 @@ import {
   drawWorld,
   moveActor,
   treeAt,
+  POIS,
   type Actor,
   type Facing,
   type WorldState,
@@ -39,6 +40,15 @@ const AI: Actor = {
   x: 11.2, z: 4.3, name: "AI内田さん", shirt: "#f0f1ec", hair: "#8d939c",
   face: "down", ph: 5, ai: true, glasses: true,
 };
+
+// Ambient NPC bots. Client-side only (no Realtime cost); shown only when few
+// real teammates are online, and labelled "(NPC)" so they aren't mistaken for
+// real people.
+const BOTS: Actor[] = [
+  { x: 5, z: 8, name: "さとう(NPC)", shirt: "#e2678b", hair: "#6b4a3a", face: "down", ph: 1, tx: 5, tz: 8, wait: 1 },
+  { x: 17, z: 5.5, name: "たなか(NPC)", shirt: "#e0a13e", hair: "#2e2620", face: "down", ph: 2, tx: 17, tz: 5.5, wait: 2.5 },
+  { x: 20, z: 12, name: "すずき(NPC)", shirt: "#5b8dd6", hair: "#54423b", face: "down", ph: 3, tx: 20, tz: 12, wait: 0.5 },
+];
 
 export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -128,6 +138,7 @@ export default function World({ progress, playerName, userId, playerColor, weath
     let raf = 0;
     let last = performance.now();
     let sinceTrack = 0;
+    let wasMoving = false;
     function frame(now: number) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
@@ -150,15 +161,41 @@ export default function World({ progress, playerName, userId, playerColor, weath
           r.x += (r.tx - r.x) * k;
           r.z += (r.tz - r.z) * k;
         }
-        // Broadcast our position a few times a second.
+        // Low-frequency presence to stay well under Realtime limits (Free allows
+        // ~20 presence msgs/sec): update when the player settles (stops moving)
+        // and on a slow heartbeat, not every frame. Remote avatars interpolate
+        // to the new spot, so it still reads as walking there.
         sinceTrack += dt;
-        if (sinceTrack > 0.12) {
+        const justStopped = wasMoving && !me.moving;
+        wasMoving = me.moving;
+        if (justStopped || sinceTrack > 4) {
           sinceTrack = 0;
           channel.track({
-            x: me.x, z: me.z, face: me.face, moving: me.moving,
+            x: me.x, z: me.z, face: me.face, moving: false,
             name: me.name, shirt: me.shirt, hair: me.hair,
           } satisfies PresenceMeta);
         }
+
+        // Ambient NPC bots fill the office when few real teammates are online.
+        const botCount = Math.max(0, 3 - remotesRef.current.size);
+        for (let i = 0; i < BOTS.length; i++) {
+          const b = BOTS[i];
+          if (i >= botCount) { b.moving = false; continue; }
+          if ((b.wait ?? 0) > 0) { b.wait = (b.wait ?? 0) - dt; b.moving = false; continue; }
+          const bx = (b.tx ?? b.x) - b.x, bz = (b.tz ?? b.z) - b.z;
+          const d = Math.hypot(bx, bz);
+          if (d < 0.25) {
+            b.wait = 1.5 + Math.random() * 4;
+            const p = POIS[Math.floor(Math.random() * POIS.length)];
+            b.tx = p.x + (Math.random() - 0.5);
+            b.tz = p.y + (Math.random() - 0.5);
+            continue;
+          }
+          moveActor(b, (bx / d) * 2.0 * dt, (bz / d) * 2.0 * dt);
+          b.moving = true;
+          b.face = Math.abs(bx) > Math.abs(bz) ? (bx > 0 ? "right" : "left") : bz > 0 ? "down" : "up";
+        }
+
         // Grow the office into a forest toward the real progress.
         worldRef.current.dispP += (worldRef.current.targetP - worldRef.current.dispP) * Math.min(1, dt * 2);
 
@@ -166,7 +203,7 @@ export default function World({ progress, playerName, userId, playerColor, weath
           dispP: worldRef.current.dispP,
           targetP: worldRef.current.targetP,
           weather: weatherRef.current,
-          actors: [me, AI, ...remotesRef.current.values()],
+          actors: [me, AI, ...BOTS.slice(0, botCount), ...remotesRef.current.values()],
         };
         drawWorld(ctx!, w, h, state, now / 1000);
       }

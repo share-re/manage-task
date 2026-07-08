@@ -41,12 +41,42 @@ export default function AssistantPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, history, userName }),
       });
-      const data = await res.json();
-      if (!res.ok) {
+
+      // エラー時はJSONで返ってくる。読んで表示して終わり。
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
         setError(data.error ?? "エラーが発生しました。");
-      } else {
-        const reply: Msg = { role: "model", text: data.reply ?? "" };
-        setMessages((prev) => [...prev, reply]);
+        return;
+      }
+
+      // 成功時は本文が「少しずつ届くストリーム」。届いた分をAIの吹き出しに足していく。
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = ""; // ここまでに届いた全文
+      let started = false; // AIの吹き出しをもう足したか
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break; // これ以上届かない＝完了
+        acc += decoder.decode(value, { stream: true });
+        if (!started) {
+          // 最初のかたまりが来たら、AIの吹き出しを新しく1つ足す
+          started = true;
+          setMessages((prev) => [...prev, { role: "model", text: acc }]);
+        } else {
+          // 2回目以降は、最後の吹き出しの中身を最新の全文に差し替える
+          setMessages((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { role: "model", text: acc };
+            return copy;
+          });
+        }
+      }
+      // 一文字も返らなかったとき
+      if (!started) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "model", text: "（応答がありませんでした）" },
+        ]);
       }
     } catch {
       setError("通信に失敗しました。ネットワークを確認してください。");
@@ -98,8 +128,8 @@ export default function AssistantPage() {
           </div>
         ))}
 
-        {/* 返答待ちの表示 */}
-        {loading && (
+        {/* 返答待ちの表示（AIの吹き出しが出るまでの間だけ） */}
+        {loading && messages[messages.length - 1]?.role === "user" && (
           <div className="flex justify-start">
             <span className="rounded-2xl bg-white px-4 py-2 text-sm text-zinc-400 ring-1 ring-black/5">
               考え中…

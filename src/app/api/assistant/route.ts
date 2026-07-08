@@ -59,11 +59,39 @@ export async function POST(req: Request) {
       history,
     });
 
-    // 今回の発言を送って、返答をもらう。
-    const response = await chat.sendMessage({ message });
-    return Response.json({ reply: response.text ?? "" });
+    // 今回の発言を送り、返答を「少しずつ」受け取る（ストリーミング）。
+    const result = await chat.sendMessageStream({ message });
+
+    // 受け取った文字を、そのままクライアントへ少しずつ流すストリームを作る。
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const chunk of result) {
+            const text = chunk.text;
+            if (text) controller.enqueue(encoder.encode(text)); // 届いた分だけ流す
+          }
+        } catch (err) {
+          // 途中でGemini側が落ちたら、印を1行入れて終わる。
+          console.error("Gemini stream error:", err);
+          controller.enqueue(
+            encoder.encode("\n\n（応答が途中で止まりました。もう一度お試しください。）"),
+          );
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    // text/plain のストリームとして返す。
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
+    });
   } catch (err) {
-    // Gemini側のエラー（レート上限・鍵ミス等）はサーバログに出し、利用者には短く返す。
+    // ストリーム開始前のエラー（レート上限・鍵ミス等）はJSONで返す。
     console.error("Gemini API error:", err);
     return Response.json(
       { error: "AIの応答に失敗しました。少し待って、もう一度お試しください。" },

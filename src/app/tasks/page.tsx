@@ -7,6 +7,7 @@ import {
   buildTaskTree,
   createTask,
   createTasks,
+  deleteTasks,
   listTasks,
   taskProgress,
   updateTaskStatus,
@@ -38,16 +39,20 @@ function TaskRow({
   task,
   comments,
   expanded,
+  deleteMode,
   onChangeStatus,
   onToggleComments,
   onAddComment,
+  onDelete,
 }: {
   task: Task;
   comments: TaskComment[];
   expanded: boolean;
+  deleteMode: boolean;
   onChangeStatus: (id: string, status: TaskStatus) => void;
   onToggleComments: (id: string) => void;
   onAddComment: (taskId: string, body: string) => Promise<void>;
+  onDelete: (task: Task) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
@@ -96,6 +101,16 @@ function TaskRow({
               </option>
             ))}
           </select>
+          {deleteMode && (
+            <button
+              type="button"
+              onClick={() => onDelete(task)}
+              aria-label="削除"
+              className="rounded-full px-2 py-1 text-sm text-red-600 hover:bg-red-50"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
 
@@ -157,6 +172,7 @@ export default function TasksPage() {
 
   // Registration form — collapsed by default, opened with the "+" button.
   const [showForm, setShowForm] = useState(false);
+  const [deleteMode, setDeleteMode] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
   const [title, setTitle] = useState("");
   const [bulkText, setBulkText] = useState("");
@@ -196,23 +212,43 @@ export default function TasksPage() {
     setError(undefined);
     try {
       if (bulkMode) {
-        const titles = bulkText
-          .split("\n")
-          .map((t) => t.trim())
-          .filter(Boolean);
-        if (titles.length === 0) {
+        // Indented lines (leading space/tab/full-width space) become children of
+        // the preceding non-indented line, so a parent and its children can be
+        // registered together. Parents are created first to obtain their ids.
+        const groups: { title: string; children: string[] }[] = [];
+        for (const raw of bulkText.split("\n")) {
+          if (!raw.trim()) continue;
+          const isChild = /^[ \t　]/.test(raw);
+          if (isChild && groups.length > 0) {
+            groups[groups.length - 1].children.push(raw.trim());
+          } else {
+            groups.push({ title: raw.trim(), children: [] });
+          }
+        }
+        if (groups.length === 0) {
           setSaving(false);
           return;
         }
-        const created = await createTasks(
-          titles.map((t) => ({
-            title: t,
-            assignee: assignee.trim(),
-            dueDate,
-            status,
-            parentId: parentId || null,
-          })),
-        );
+        const shared = { assignee: assignee.trim(), dueDate, status };
+        const created: Task[] = [];
+        for (const group of groups) {
+          const parent = await createTask({
+            ...shared,
+            title: group.title,
+            parentId: null,
+          });
+          created.push(parent);
+          if (group.children.length > 0) {
+            const kids = await createTasks(
+              group.children.map((t) => ({
+                ...shared,
+                title: t,
+                parentId: parent.id,
+              })),
+            );
+            created.push(...kids);
+          }
+        }
         setTasks((prev) => [...prev, ...created]);
         setBulkText("");
       } else {
@@ -278,6 +314,25 @@ export default function TasksPage() {
     }
   }
 
+  async function handleDelete(task: Task) {
+    const children = tasks.filter((t) => t.parent_id === task.id);
+    const message =
+      children.length > 0
+        ? `「${task.title}」と、ぶら下がる子タスク${children.length}件を削除します。よろしいですか？`
+        : `「${task.title}」を削除します。よろしいですか？`;
+    if (!window.confirm(message)) return;
+    const ids = [...children.map((c) => c.id), task.id];
+    try {
+      // Delete children first so the parent_id foreign key isn't violated.
+      if (children.length > 0) await deleteTasks(children.map((c) => c.id));
+      await deleteTasks([task.id]);
+      setTasks((prev) => prev.filter((t) => !ids.includes(t.id)));
+    } catch (err) {
+      console.error(err);
+      setError("削除に失敗しました。時間をおいて再度お試しください。");
+    }
+  }
+
   // Only top-level tasks can be a parent — keeps it 2 levels.
   const parentOptions = tasks.filter((t) => !t.parent_id);
   const assigneeOptions = useMemo(
@@ -316,9 +371,11 @@ export default function TasksPage() {
       task={task}
       comments={commentsByTask[task.id] ?? []}
       expanded={expanded.has(task.id)}
+      deleteMode={deleteMode}
       onChangeStatus={handleStatusChange}
       onToggleComments={toggleComments}
       onAddComment={handleAddComment}
+      onDelete={handleDelete}
     />
   );
 
@@ -363,8 +420,8 @@ export default function TasksPage() {
         </p>
       </div>
 
-      {/* Toolbar: add button + filters/sort */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      {/* Toolbar: add / delete buttons + filters/sort */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setShowForm((v) => !v)}
@@ -372,15 +429,26 @@ export default function TasksPage() {
         >
           {showForm ? "× 閉じる" : "＋ タスクを追加"}
         </button>
+        <button
+          type="button"
+          onClick={() => setDeleteMode((v) => !v)}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+            deleteMode
+              ? "bg-red-600 text-white hover:bg-red-500"
+              : "border border-red-300 text-red-600 hover:bg-red-50"
+          }`}
+        >
+          {deleteMode ? "× 削除を終了" : "🗑 削除"}
+        </button>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
+        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <select
             value={filterAssignee}
             onChange={(e) => setFilterAssignee(e.target.value)}
             aria-label="担当者で絞り込み"
-            className={inputClass}
+            className={`${inputClass} max-w-[8rem] py-1.5`}
           >
-            <option value="">担当者（すべて）</option>
+            <option value="">担当者：すべて</option>
             {assigneeOptions.map((a) => (
               <option key={a} value={a}>
                 {a}
@@ -391,9 +459,9 @@ export default function TasksPage() {
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as "" | TaskStatus)}
             aria-label="状態で絞り込み"
-            className={inputClass}
+            className={`${inputClass} max-w-[7rem] py-1.5`}
           >
-            <option value="">状態（すべて）</option>
+            <option value="">状態：すべて</option>
             {STATUS_ORDER.map((s) => (
               <option key={s} value={s}>
                 {STATUS_META[s].label}
@@ -404,15 +472,20 @@ export default function TasksPage() {
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             aria-label="並び替え"
-            className={inputClass}
+            className={`${inputClass} max-w-[9rem] py-1.5`}
           >
-            <option value="default">並び順（既定）</option>
+            <option value="default">並び順：既定</option>
             <option value="due">期限が近い順</option>
             <option value="assignee">担当者順</option>
             <option value="status">状態順</option>
           </select>
         </div>
       </div>
+      {deleteMode && (
+        <p className="mb-4 text-sm text-red-600">
+          削除モード中：各タスクの「×」で削除できます（親を消すと子も一緒に削除されます）。
+        </p>
+      )}
 
       {/* Registration form (collapsible) */}
       {showForm && (
@@ -436,17 +509,19 @@ export default function TasksPage() {
           {bulkMode ? (
             <label className="flex flex-col gap-1">
               <span className="text-sm font-medium text-zinc-700">
-                内容（1行に1タスク）
+                内容（1行に1タスク／行頭に空白で子タスク）
               </span>
               <textarea
                 value={bulkText}
                 onChange={(e) => setBulkText(e.target.value)}
-                rows={4}
-                placeholder={"例：\nログイン画面の設計\nDBスキーマの作成\nテストの作成"}
+                rows={5}
+                placeholder={
+                  "例：\nログイン機能\n  画面の設計\n  APIの実装\nDBスキーマの作成"
+                }
                 className={`${inputClass} resize-y`}
               />
               <span className="text-xs text-zinc-400">
-                下の担当者・期限・状態・親タスクが全行に共通で適用されます
+                行頭にスペースを入れると、直前の行の子タスクになります。担当者・期限・状態は全行に共通で適用されます。
               </span>
             </label>
           ) : (
@@ -462,21 +537,23 @@ export default function TasksPage() {
             </label>
           )}
 
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-zinc-700">親タスク</span>
-            <select
-              value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
-              className={inputClass}
-            >
-              <option value="">なし（親タスクとして登録）</option>
-              {parentOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!bulkMode && (
+            <label className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-700">親タスク</span>
+              <select
+                value={parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                className={inputClass}
+              >
+                <option value="">なし（親タスクとして登録）</option>
+                {parentOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <div className="flex flex-col gap-4 sm:flex-row">
             <label className="flex flex-1 flex-col gap-1">

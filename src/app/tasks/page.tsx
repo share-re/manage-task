@@ -40,6 +40,8 @@ function TaskRow({
   comments,
   expanded,
   deleteMode,
+  isChild,
+  childCount,
   onChangeStatus,
   onToggleComments,
   onAddComment,
@@ -49,6 +51,8 @@ function TaskRow({
   comments: TaskComment[];
   expanded: boolean;
   deleteMode: boolean;
+  isChild: boolean;
+  childCount: number;
   onChangeStatus: (id: string, status: TaskStatus) => void;
   onToggleComments: (id: string) => void;
   onAddComment: (taskId: string, body: string) => Promise<void>;
@@ -70,10 +74,28 @@ function TaskRow({
   }
 
   return (
-    <div className="rounded-lg bg-white shadow-sm ring-1 ring-black/5">
+    <div
+      className={`rounded-lg shadow-sm ring-1 ring-black/5 ${
+        isChild ? "bg-zinc-50" : "bg-white"
+      }`}
+    >
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
-          <p className="truncate font-medium text-zinc-900">{task.title}</p>
+          <div className="flex items-center gap-1.5">
+            {isChild && <span className="shrink-0 text-zinc-400">└</span>}
+            <p
+              className={`truncate text-zinc-900 ${
+                isChild ? "font-normal" : "font-semibold"
+              }`}
+            >
+              {task.title}
+            </p>
+            {childCount > 0 && (
+              <span className="shrink-0 rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                子 {childCount}
+              </span>
+            )}
+          </div>
           <p className="mt-0.5 text-xs text-zinc-500">
             {task.assignee || "担当者なし"} ・ {formatDue(task.due_date)}
           </p>
@@ -366,12 +388,17 @@ export default function TasksPage() {
   const tree = useMemo(() => buildTaskTree(tasks), [tasks]);
   const progress = taskProgress(tasks);
 
-  const renderRow = (task: Task) => (
+  const renderRow = (
+    task: Task,
+    opts: { isChild?: boolean; childCount?: number } = {},
+  ) => (
     <TaskRow
       task={task}
       comments={commentsByTask[task.id] ?? []}
       expanded={expanded.has(task.id)}
       deleteMode={deleteMode}
+      isChild={opts.isChild ?? false}
+      childCount={opts.childCount ?? 0}
       onChangeStatus={handleStatusChange}
       onToggleComments={toggleComments}
       onAddComment={handleAddComment}
@@ -630,7 +657,9 @@ export default function TasksPage() {
           ) : (
             <ul className="flex flex-col gap-3">
               {flatList.map((task) => (
-                <li key={task.id}>{renderRow(task)}</li>
+                <li key={task.id}>
+                  {renderRow(task, { isChild: !!task.parent_id })}
+                </li>
               ))}
             </ul>
           )
@@ -639,11 +668,11 @@ export default function TasksPage() {
           <ul className="flex flex-col gap-3">
             {tree.map(({ task: parent, children }) => (
               <li key={parent.id}>
-                {renderRow(parent)}
+                {renderRow(parent, { childCount: children.length })}
                 {children.length > 0 && (
-                  <ul className="mt-2 ml-4 flex flex-col gap-2 border-l-2 border-zinc-200 pl-4">
+                  <ul className="mt-2 ml-5 flex flex-col gap-2 border-l-2 border-zinc-300 pl-4">
                     {children.map((child) => (
-                      <li key={child.id}>{renderRow(child)}</li>
+                      <li key={child.id}>{renderRow(child, { isChild: true })}</li>
                     ))}
                   </ul>
                 )}

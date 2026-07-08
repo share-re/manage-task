@@ -9,12 +9,14 @@ import {
   WEEKDAY_LABELS,
   type MailFrequency,
 } from "@/lib/emailSettings";
+import { listSendLog, type SendLog } from "@/lib/sendLog";
 
 export default function MailSettingsPage() {
   const { session } = useAuth();
 
   const [settingsId, setSettingsId] = useState<string>();
-  const [recipients, setRecipients] = useState("");
+  const [toRecipients, setToRecipients] = useState("");
+  const [bccRecipients, setBccRecipients] = useState("");
   const [frequency, setFrequency] = useState<MailFrequency>("weekly");
   const [dayOfWeek, setDayOfWeek] = useState<number>(1); // Monday
   const [sendTime, setSendTime] = useState("09:00");
@@ -35,6 +37,9 @@ export default function MailSettingsPage() {
   const [sendingNow, setSendingNow] = useState(false);
   const [nowMessage, setNowMessage] = useState<string>();
   const [nowError, setNowError] = useState<string>();
+
+  // Send history.
+  const [logs, setLogs] = useState<SendLog[]>([]);
 
   useEffect(() => {
     if (session?.user.email && !testRecipient) {
@@ -102,7 +107,13 @@ export default function MailSettingsPage() {
       .then((s) => {
         if (!s) return;
         setSettingsId(s.id);
-        setRecipients(s.recipients);
+        // Prefer the new To/Bcc fields; fall back to the legacy single field.
+        if (s.to_recipients || s.bcc_recipients) {
+          setToRecipients(s.to_recipients ?? "");
+          setBccRecipients(s.bcc_recipients ?? "");
+        } else if (s.recipients) {
+          setBccRecipients(s.recipients);
+        }
         setFrequency(s.frequency);
         setDayOfWeek(s.day_of_week ?? 1);
         setSendTime(s.send_time.slice(0, 5)); // "HH:MM:SS" -> "HH:MM"
@@ -113,6 +124,11 @@ export default function MailSettingsPage() {
         setError("設定の読み込みに失敗しました。");
       })
       .finally(() => setLoaded(true));
+
+    // Load recent send history (optional; missing table shouldn't break the page).
+    listSendLog(10)
+      .then(setLogs)
+      .catch((err) => console.error("送信履歴の読み込みに失敗:", err));
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -123,7 +139,8 @@ export default function MailSettingsPage() {
     try {
       const saved = await saveEmailSettings(
         {
-          recipients: recipients.trim(),
+          toRecipients: toRecipients.trim(),
+          bccRecipients: bccRecipients.trim(),
           frequency,
           dayOfWeek: frequency === "weekly" ? dayOfWeek : null,
           sendTime,
@@ -151,8 +168,8 @@ export default function MailSettingsPage() {
       </div>
 
       <p className="mb-6 text-sm text-zinc-500">
-        進捗サマリを定期的にメール送信するための設定です。送信先とスケジュールを保存します。
-        （実際の自動送信は今後実装します。）
+        進捗サマリを定期的にメール送信するための設定です。保存した送信先・頻度・時刻にしたがって
+        自動で送信されます（「自動送信を有効にする」がオンの間）。
       </p>
 
       {!loaded ? (
@@ -182,18 +199,33 @@ export default function MailSettingsPage() {
             )}
           </div>
 
-          {/* Recipients */}
+          {/* Recipients: To / Bcc */}
           <label className="flex flex-col gap-1">
             <span className="text-sm font-medium text-zinc-700">
-              送信先アドレス（複数の場合はカンマ区切り）
+              To（宛先・複数はカンマ区切り）
             </span>
             <input
               type="text"
-              value={recipients}
-              onChange={(e) => setRecipients(e.target.value)}
-              placeholder="例：a@example.com, b@example.com"
+              value={toRecipients}
+              onChange={(e) => setToRecipients(e.target.value)}
+              placeholder="例：leader@example.com"
               className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-zinc-700">
+              Bcc（他の宛先に見せない・複数はカンマ区切り）
+            </span>
+            <input
+              type="text"
+              value={bccRecipients}
+              onChange={(e) => setBccRecipients(e.target.value)}
+              placeholder="例：member1@example.com, member2@example.com"
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
+            <span className="text-xs text-zinc-400">
+              To を空にして Bcc だけにすると、受信者同士にアドレスが見えません。
+            </span>
           </label>
 
           {/* Frequency */}
@@ -306,6 +338,55 @@ export default function MailSettingsPage() {
           {nowError && <p className="mt-2 text-sm text-red-600">{nowError}</p>}
           {nowMessage && (
             <p className="mt-2 text-sm text-green-700">{nowMessage}</p>
+          )}
+        </div>
+      )}
+
+      {/* Send history */}
+      {loaded && (
+        <div className="mt-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
+          <h2 className="text-lg font-semibold text-zinc-800">送信履歴</h2>
+          {logs.length === 0 ? (
+            <p className="mt-1 text-sm text-zinc-400">
+              まだ送信履歴はありません。
+            </p>
+          ) : (
+            <ul className="mt-3 flex flex-col divide-y divide-zinc-100">
+              {logs.map((log) => (
+                <li
+                  key={log.id}
+                  className="flex items-start justify-between gap-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="text-zinc-800">
+                      {new Date(log.sent_at).toLocaleString("ja-JP", {
+                        month: "numeric",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                    <p className="truncate text-xs text-zinc-500">
+                      {log.recipients || "（宛先不明）"}
+                    </p>
+                    {log.status === "failed" && log.error && (
+                      <p className="truncate text-xs text-red-600">
+                        {log.error}
+                      </p>
+                    )}
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      log.status === "sent"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
+                  >
+                    {log.status === "sent" ? "送信成功" : "失敗"}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

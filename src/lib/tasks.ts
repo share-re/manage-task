@@ -104,6 +104,25 @@ export async function createTask(input: NewTask): Promise<Task> {
   return normalizeTask(data);
 }
 
+/** Create several tasks at once (bulk registration). */
+export async function createTasks(inputs: NewTask[]): Promise<Task[]> {
+  const now = new Date().toISOString();
+  const rows = inputs.map((input) => ({
+    title: input.title,
+    assignee: input.assignee || null,
+    due_date: input.dueDate || null,
+    status: input.status,
+    parent_id: input.parentId ?? null,
+    completed_at: input.status === "done" ? now : null,
+  }));
+  const { data, error } = await supabase
+    .from("tasks")
+    .insert(rows)
+    .select(TASK_COLUMNS);
+  if (error) throw error;
+  return (data ?? []).map(normalizeTask);
+}
+
 /** Team-wide progress: how many tasks are done out of all tasks. */
 export function taskProgress(tasks: Task[]): {
   done: number;

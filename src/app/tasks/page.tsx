@@ -206,7 +206,10 @@ export default function TasksPage() {
 
   // Filter / sort.
   const [filterAssignee, setFilterAssignee] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"" | TaskStatus>("");
+  // "" = all, a status = that status, "open" = everything except done.
+  const [filterStatus, setFilterStatus] = useState<"" | TaskStatus | "open">(
+    "",
+  );
   const [sortKey, setSortKey] = useState<SortKey>("default");
 
   // Today's date (YYYY-MM-DD, local) — the earliest allowed due date. Set in an
@@ -386,7 +389,10 @@ export default function TasksPage() {
     let list = tasks.slice();
     if (filterAssignee)
       list = list.filter((t) => (t.assignee || "") === filterAssignee);
-    if (filterStatus) list = list.filter((t) => t.status === filterStatus);
+    if (filterStatus === "open")
+      list = list.filter((t) => t.status !== "done");
+    else if (filterStatus)
+      list = list.filter((t) => t.status === filterStatus);
     const comparators: Record<SortKey, (a: Task, b: Task) => number> = {
       default: () => 0,
       due: (a, b) =>
@@ -507,11 +513,14 @@ export default function TasksPage() {
           </select>
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as "" | TaskStatus)}
+            onChange={(e) =>
+              setFilterStatus(e.target.value as "" | TaskStatus | "open")
+            }
             aria-label="状態で絞り込み"
-            className={`${inputClass} max-w-[7rem] py-1.5`}
+            className={`${inputClass} max-w-[8rem] py-1.5`}
           >
             <option value="">状態：すべて</option>
+            <option value="open">完了を隠す（未完のみ）</option>
             {STATUS_ORDER.map((s) => (
               <option key={s} value={s}>
                 {STATUS_META[s].label}

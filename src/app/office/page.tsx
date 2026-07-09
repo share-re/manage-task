@@ -128,6 +128,11 @@ export default function OfficePage() {
   // the 内田さん chat are mutually exclusive so they never overlap on the right.
   const toggleTasks = () => { setShowChat(false); setShowTasks((v) => !v); };
   const toggleChat = () => { setShowTasks(false); setShowChat((v) => !v); };
+  // Clicking a station in the world (task board / 内田さん) opens its panel.
+  const openStation = (id: "task" | "uchida") => {
+    if (id === "task") { setShowChat(false); setShowTasks(true); }
+    else { setShowTasks(false); setShowChat(true); }
+  };
 
   function handlePick(species: string | null, x: number, y: number) {
     if (species) {
@@ -155,6 +160,7 @@ export default function OfficePage() {
         playerColor={playerColor}
         weather={effectiveWeather}
         onPickPlant={handlePick}
+        onStationClick={openStation}
       />
 
       {/* Top-left: compact title + station toggles */}
@@ -165,7 +171,7 @@ export default function OfficePage() {
           </h1>
           <p className="mt-1 text-[11px] leading-relaxed text-[#a08a76]">
             <kbd className="rounded bg-black/5 px-1">WASD</kbd>/矢印で移動。
-            下の<b className="text-[#4a3b2f]">ボタン</b>で進捗・内田さんを開けます（完了 {done}/{total}）
+            下の<b className="text-[#4a3b2f]">ボタン</b>、または世界の<b className="text-[#4a3b2f]">タスク台・内田さん</b>をクリックで開けます（完了 {done}/{total}）
           </p>
           <div className="mt-2 flex gap-1.5">
             <button

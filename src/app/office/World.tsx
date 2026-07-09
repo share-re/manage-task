@@ -7,7 +7,9 @@ import {
   moveActor,
   seatForUser,
   treeAt,
+  viewTransform,
   STATIONS,
+  T,
   type Actor,
   type Facing,
   type StationId,
@@ -25,6 +27,9 @@ type Props = {
   // Fired when the player walks into / out of a station's radius, so the page
   // can auto-open (or close) the matching panel — the "近づくと開く" HUD.
   onStationChange?: (id: StationId, near: boolean) => void;
+  // Fired when a station (task board / 内田さん) is clicked, so the page can open
+  // the matching panel without having to walk over to it.
+  onStationClick?: (id: StationId) => void;
 };
 
 // What each client shares about itself over Realtime Presence.
@@ -46,7 +51,7 @@ const AI: Actor = {
   face: "down", ph: 5, ai: true, glasses: true,
 };
 
-export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange }: Props) {
+export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange, onStationClick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
   // Arrive at a seat in one of the zones (see SEATS), not one shared spawn spot.
@@ -237,6 +242,18 @@ export default function World({ progress, playerName, userId, playerColor, weath
           onPickPlant(tr ? tr.species : null, e.clientX, e.clientY);
         }}
         onPointerLeave={() => onPickPlant?.(null, 0, 0)}
+        onClick={(e) => {
+          if (!onStationClick) return;
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const rect = canvas.getBoundingClientRect();
+          const { scale, ox, oy } = viewTransform(selfRef.current, canvas.clientWidth, canvas.clientHeight);
+          const wx = (e.clientX - rect.left) / scale + ox;
+          const wy = (e.clientY - rect.top) / scale + oy;
+          for (const s of STATIONS) {
+            if (Math.hypot(wx - s.x * T, wy - s.z * T) < s.r * T) { onStationClick(s.id); return; }
+          }
+        }}
       />
       <div className="pointer-events-none absolute bottom-5 right-5 grid grid-cols-3 grid-rows-2 gap-2 md:hidden">
         <span />

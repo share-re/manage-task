@@ -49,28 +49,55 @@ export default function AssistantPage() {
         return;
       }
 
-      // 成功時は本文が「少しずつ届くストリーム」。届いた分をAIの吹き出しに足していく。
+      // 成功時は本文が「少しずつ届くストリーム」。
+      // 届いた文字は acc に貯め、画面へは "タイプライター" で少しずつ出す。
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let acc = ""; // ここまでに届いた全文
+      let acc = ""; // サーバから届いた全文
+      let streamDone = false; // 受信が終わったか
+      let shown = 0; // 画面に出し終えた文字数（コードポイント単位）
       let started = false; // AIの吹き出しをもう足したか
+
+      // 表示を進める非同期ループ。残り文字が多いほど速く、少ないほど1文字ずつ。
+      // → 短文はなめらかに打ち、長文でも数秒で出し切る（固定20ms/字だと長文が遅すぎるため）。
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const typer = (async () => {
+        const INTERVAL = 70; // 1コマの間隔(ms)。大きいほどゆっくり打つ
+        while (true) {
+          const glyphs = Array.from(acc); // 日本語や絵文字も1文字として扱う
+          const total = glyphs.length;
+          if (shown < total) {
+            shown = Math.min(
+              total,
+              shown + Math.max(1, Math.ceil((total - shown) / 12)),
+            );
+            const out = glyphs.slice(0, shown).join("");
+            if (!started) {
+              started = true;
+              setMessages((prev) => [...prev, { role: "model", text: out }]);
+            } else {
+              setMessages((prev) => {
+                const copy = [...prev];
+                copy[copy.length - 1] = { role: "model", text: out };
+                return copy;
+              });
+            }
+          } else if (streamDone) {
+            break; // 出し切った＆受信も完了
+          }
+          await sleep(INTERVAL);
+        }
+      })();
+
+      // 受信ループ：届いた分を acc に足すだけ（表示は typer が担当）。
       while (true) {
         const { done, value } = await reader.read();
         if (done) break; // これ以上届かない＝完了
         acc += decoder.decode(value, { stream: true });
-        if (!started) {
-          // 最初のかたまりが来たら、AIの吹き出しを新しく1つ足す
-          started = true;
-          setMessages((prev) => [...prev, { role: "model", text: acc }]);
-        } else {
-          // 2回目以降は、最後の吹き出しの中身を最新の全文に差し替える
-          setMessages((prev) => {
-            const copy = [...prev];
-            copy[copy.length - 1] = { role: "model", text: acc };
-            return copy;
-          });
-        }
       }
+      streamDone = true;
+      await typer; // 画面に出し切るまで待つ
+
       // 一文字も返らなかったとき
       if (!started) {
         setMessages((prev) => [

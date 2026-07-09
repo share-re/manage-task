@@ -200,7 +200,12 @@ export default function AssistantPage() {
   }
 
   return (
-    <main className="mx-auto flex h-screen w-full max-w-2xl flex-col px-4 py-6">
+    // このページだけ常にライト表示に固定（OSがダークでも反転させない）。
+    <div
+      className="min-h-screen bg-white text-zinc-900"
+      style={{ colorScheme: "light" }}
+    >
+      <main className="mx-auto flex h-screen w-full max-w-2xl flex-col px-4 py-6">
       {/* ヘッダー */}
       <header className="mb-4 flex items-center justify-between">
         <div>
@@ -284,6 +289,7 @@ export default function AssistantPage() {
           送信
         </button>
       </form>
-    </main>
+      </main>
+    </div>
   );
 }

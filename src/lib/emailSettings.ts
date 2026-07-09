@@ -4,7 +4,9 @@ export type MailFrequency = "daily" | "weekly";
 
 export type EmailSettings = {
   id: string;
-  recipients: string; // comma-separated addresses
+  recipients: string | null; // legacy single field (kept for backward compat)
+  to_recipients: string | null; // comma-separated "To" addresses
+  bcc_recipients: string | null; // comma-separated "Bcc" addresses
   frequency: MailFrequency;
   day_of_week: number | null; // 0=Sun .. 6=Sat, used when weekly
   send_time: string; // "HH:MM" or "HH:MM:SS"
@@ -28,7 +30,8 @@ export async function getEmailSettings(): Promise<EmailSettings | null> {
 }
 
 export type EmailSettingsInput = {
-  recipients: string;
+  toRecipients: string;
+  bccRecipients: string;
   frequency: MailFrequency;
   dayOfWeek: number | null;
   sendTime: string;
@@ -41,7 +44,8 @@ export async function saveEmailSettings(
   id?: string,
 ): Promise<EmailSettings> {
   const payload = {
-    recipients: input.recipients,
+    to_recipients: input.toRecipients,
+    bcc_recipients: input.bccRecipients,
     frequency: input.frequency,
     day_of_week: input.frequency === "weekly" ? input.dayOfWeek : null,
     send_time: input.sendTime,

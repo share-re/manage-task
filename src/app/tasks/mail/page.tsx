@@ -9,12 +9,14 @@ import {
   WEEKDAY_LABELS,
   type MailFrequency,
 } from "@/lib/emailSettings";
+import { listSendLog, type SendLog } from "@/lib/sendLog";
 
 export default function MailSettingsPage() {
   const { session } = useAuth();
 
   const [settingsId, setSettingsId] = useState<string>();
-  const [recipients, setRecipients] = useState("");
+  const [toRecipients, setToRecipients] = useState("");
+  const [bccRecipients, setBccRecipients] = useState("");
   const [frequency, setFrequency] = useState<MailFrequency>("weekly");
   const [dayOfWeek, setDayOfWeek] = useState<number>(1); // Monday
   const [sendTime, setSendTime] = useState("09:00");
@@ -25,19 +27,22 @@ export default function MailSettingsPage() {
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
 
-  // Test send: default the recipient to the logged-in user's own address.
-  const [testRecipient, setTestRecipient] = useState("");
+  // Test send: always to the logged-in user's own address.
   const [testing, setTesting] = useState(false);
   const [testMessage, setTestMessage] = useState<string>();
   const [testError, setTestError] = useState<string>();
 
-  useEffect(() => {
-    if (session?.user.email && !testRecipient) {
-      setTestRecipient(session.user.email);
-    }
-  }, [session, testRecipient]);
+  // Send now: send the summary to the saved recipients immediately.
+  const [sendingNow, setSendingNow] = useState(false);
+  const [nowMessage, setNowMessage] = useState<string>();
+  const [nowError, setNowError] = useState<string>();
+
+  // Send history.
+  const [logs, setLogs] = useState<SendLog[]>([]);
 
   async function onTestSend() {
+    const target = session?.user.email;
+    if (!target) return;
     setTesting(true);
     setTestMessage(undefined);
     setTestError(undefined);
@@ -48,7 +53,7 @@ export default function MailSettingsPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token ?? ""}`,
         },
-        body: JSON.stringify({ testRecipient: testRecipient.trim() }),
+        body: JSON.stringify({ testRecipient: target }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "送信に失敗しました。");
@@ -61,12 +66,49 @@ export default function MailSettingsPage() {
     }
   }
 
+  async function onSendNow() {
+    if (
+      !window.confirm(
+        "保存済みの送信先へ、進捗サマリを今すぐ送信します。よろしいですか？",
+      )
+    )
+      return;
+    setSendingNow(true);
+    setNowMessage(undefined);
+    setNowError(undefined);
+    try {
+      const res = await fetch("/api/send-summary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        // No testRecipient / no scheduled -> send to the saved recipients now.
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "送信に失敗しました。");
+      setNowMessage(`送信しました：${(data.sentTo ?? []).join(", ")}`);
+    } catch (err) {
+      console.error(err);
+      setNowError(err instanceof Error ? err.message : "送信に失敗しました。");
+    } finally {
+      setSendingNow(false);
+    }
+  }
+
   useEffect(() => {
     getEmailSettings()
       .then((s) => {
         if (!s) return;
         setSettingsId(s.id);
-        setRecipients(s.recipients);
+        // Prefer the new To/Bcc fields; fall back to the legacy single field.
+        if (s.to_recipients || s.bcc_recipients) {
+          setToRecipients(s.to_recipients ?? "");
+          setBccRecipients(s.bcc_recipients ?? "");
+        } else if (s.recipients) {
+          setBccRecipients(s.recipients);
+        }
         setFrequency(s.frequency);
         setDayOfWeek(s.day_of_week ?? 1);
         setSendTime(s.send_time.slice(0, 5)); // "HH:MM:SS" -> "HH:MM"
@@ -77,6 +119,11 @@ export default function MailSettingsPage() {
         setError("設定の読み込みに失敗しました。");
       })
       .finally(() => setLoaded(true));
+
+    // Load recent send history (optional; missing table shouldn't break the page).
+    listSendLog(10)
+      .then(setLogs)
+      .catch((err) => console.error("送信履歴の読み込みに失敗:", err));
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -87,7 +134,8 @@ export default function MailSettingsPage() {
     try {
       const saved = await saveEmailSettings(
         {
-          recipients: recipients.trim(),
+          toRecipients: toRecipients.trim(),
+          bccRecipients: bccRecipients.trim(),
           frequency,
           dayOfWeek: frequency === "weekly" ? dayOfWeek : null,
           sendTime,
@@ -107,16 +155,29 @@ export default function MailSettingsPage() {
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-zinc-900">メール共有の設定</h1>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-zinc-900">メール共有の設定</h1>
+          <button
+            type="button"
+            onClick={onTestSend}
+            disabled={testing || !session?.user.email}
+            title="自分のメールアドレス宛てに1通送って確認します"
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+          >
+            {testing ? "送信中…" : "テスト送信"}
+          </button>
+        </div>
         <Link href="/tasks" className="text-sm text-zinc-500 hover:underline">
           ← 進捗管理に戻る
         </Link>
       </div>
+      {testError && <p className="mb-2 text-sm text-red-600">{testError}</p>}
+      {testMessage && <p className="mb-2 text-sm text-green-700">{testMessage}</p>}
 
       <p className="mb-6 text-sm text-zinc-500">
-        進捗サマリを定期的にメール送信するための設定です。送信先とスケジュールを保存します。
-        （実際の自動送信は今後実装します。）
+        進捗サマリを定期的にメール送信するための設定です。保存した送信先・頻度・時刻にしたがって
+        自動で送信されます（「自動送信を有効にする」がオンの間）。
       </p>
 
       {!loaded ? (
@@ -146,18 +207,33 @@ export default function MailSettingsPage() {
             )}
           </div>
 
-          {/* Recipients */}
+          {/* Recipients: To / Bcc */}
           <label className="flex flex-col gap-1">
             <span className="text-sm font-medium text-zinc-700">
-              送信先アドレス（複数の場合はカンマ区切り）
+              To（宛先・複数はカンマ区切り）
             </span>
             <input
               type="text"
-              value={recipients}
-              onChange={(e) => setRecipients(e.target.value)}
-              placeholder="例：a@example.com, b@example.com"
+              value={toRecipients}
+              onChange={(e) => setToRecipients(e.target.value)}
+              placeholder="例：leader@example.com"
               className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-zinc-700">
+              Bcc（他の宛先に見せない・複数はカンマ区切り）
+            </span>
+            <input
+              type="text"
+              value={bccRecipients}
+              onChange={(e) => setBccRecipients(e.target.value)}
+              placeholder="例：member1@example.com, member2@example.com"
+              className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
+            <span className="text-xs text-zinc-400">
+              To を空にして Bcc だけにすると、受信者同士にアドレスが見えません。
+            </span>
           </label>
 
           {/* Frequency */}
@@ -215,38 +291,75 @@ export default function MailSettingsPage() {
         </form>
       )}
 
-      {/* Test send: send the current progress summary once, to confirm delivery. */}
+
+      {/* Send now: send to the saved recipients immediately (no schedule wait). */}
       {loaded && (
         <div className="mt-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
-          <h2 className="text-lg font-semibold text-zinc-800">テスト送信</h2>
+          <h2 className="text-lg font-semibold text-zinc-800">今すぐ送信</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            現在の進捗サマリを1通だけ送って、届くか確認できます。まずは自分のアドレスでお試しください。
+            スケジュールを待たず、<strong>保存済みの送信先</strong>
+            へ進捗サマリを今すぐ送ります。宛先を変えた場合は先に「保存する」を押してください。
           </p>
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="flex flex-1 flex-col gap-1">
-              <span className="text-sm font-medium text-zinc-700">
-                テスト送信先
-              </span>
-              <input
-                type="email"
-                value={testRecipient}
-                onChange={(e) => setTestRecipient(e.target.value)}
-                placeholder="自分のメールアドレス"
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={onTestSend}
-              disabled={testing || !testRecipient.trim()}
-              className="rounded-lg border border-zinc-300 px-5 py-2 font-medium text-zinc-800 transition hover:bg-zinc-100 disabled:opacity-50"
-            >
-              {testing ? "送信中…" : "テスト送信"}
-            </button>
-          </div>
-          {testError && <p className="mt-2 text-sm text-red-600">{testError}</p>}
-          {testMessage && (
-            <p className="mt-2 text-sm text-green-700">{testMessage}</p>
+          <button
+            type="button"
+            onClick={onSendNow}
+            disabled={sendingNow}
+            className="mt-3 rounded-lg bg-zinc-900 px-5 py-2 font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {sendingNow ? "送信中…" : "今すぐ送信"}
+          </button>
+          {nowError && <p className="mt-2 text-sm text-red-600">{nowError}</p>}
+          {nowMessage && (
+            <p className="mt-2 text-sm text-green-700">{nowMessage}</p>
+          )}
+        </div>
+      )}
+
+      {/* Send history */}
+      {loaded && (
+        <div className="mt-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
+          <h2 className="text-lg font-semibold text-zinc-800">送信履歴</h2>
+          {logs.length === 0 ? (
+            <p className="mt-1 text-sm text-zinc-400">
+              まだ送信履歴はありません。
+            </p>
+          ) : (
+            <ul className="mt-3 flex flex-col divide-y divide-zinc-100">
+              {logs.map((log) => (
+                <li
+                  key={log.id}
+                  className="flex items-start justify-between gap-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="text-zinc-800">
+                      {new Date(log.sent_at).toLocaleString("ja-JP", {
+                        month: "numeric",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                    <p className="truncate text-xs text-zinc-500">
+                      {log.recipients || "（宛先不明）"}
+                    </p>
+                    {log.status === "failed" && log.error && (
+                      <p className="truncate text-xs text-red-600">
+                        {log.error}
+                      </p>
+                    )}
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      log.status === "sent"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
+                  >
+                    {log.status === "sent" ? "送信成功" : "失敗"}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

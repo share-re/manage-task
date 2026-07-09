@@ -84,7 +84,9 @@ export async function POST(request: Request) {
   // Load the single team-wide settings row.
   const { data: settings } = await supabaseAdmin
     .from("email_settings")
-    .select("id, recipients, frequency, day_of_week, send_time, enabled, last_sent_at")
+    .select(
+      "id, recipients, to_recipients, bcc_recipients, frequency, day_of_week, send_time, enabled, last_sent_at",
+    )
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -97,22 +99,33 @@ export async function POST(request: Request) {
     }
   }
 
-  // Decide who to send to.
-  let recipients: string[];
-  if (body.testRecipient) {
-    recipients = [body.testRecipient.trim()].filter(Boolean);
-  } else {
-    recipients = (settings?.recipients ?? "")
+  // Decide who to send to. Test sends go to the one address as "To"; otherwise
+  // use the saved To / Bcc (falling back to the legacy "recipients" as Bcc).
+  const parseList = (v: string | null | undefined): string[] =>
+    (v ?? "")
       .split(",")
-      .map((s: string) => s.trim())
+      .map((s) => s.trim())
       .filter(Boolean);
+
+  let to: string[];
+  let bcc: string[];
+  if (body.testRecipient) {
+    to = parseList(body.testRecipient);
+    bcc = [];
+  } else {
+    to = parseList(settings?.to_recipients);
+    bcc = parseList(settings?.bcc_recipients);
+    if (to.length === 0 && bcc.length === 0) {
+      bcc = parseList(settings?.recipients); // legacy fallback
+    }
   }
-  if (recipients.length === 0) {
+  if (to.length === 0 && bcc.length === 0) {
     return NextResponse.json(
       { error: "送信先が設定されていません。" },
       { status: 400 },
     );
   }
+  const recipients = [...to, ...bcc];
 
   // Read all tasks (service role bypasses RLS).
   const { data: tasks, error: tasksErr } = await supabaseAdmin
@@ -133,20 +146,38 @@ export async function POST(request: Request) {
     lastSentAt: settings?.last_sent_at ?? null,
   });
 
+  // Record every attempt in the send history (best-effort; never blocks send).
+  const logSend = async (status: "sent" | "failed", errMsg?: string) => {
+    try {
+      await supabaseAdmin.from("email_send_log").insert({
+        recipients: recipients.join(", "),
+        subject: summary.subject,
+        status,
+        error: errMsg ?? null,
+      });
+    } catch (e) {
+      console.error("send-log insert failed:", e);
+    }
+  };
+
   try {
     await sendMail({
-      to: recipients,
+      to,
+      bcc,
       subject: summary.subject,
       text: summary.text,
       html: summary.html,
     });
   } catch (err) {
     console.error(err);
+    await logSend("failed", err instanceof Error ? err.message : String(err));
     return NextResponse.json(
       { error: "メール送信に失敗しました。SMTP設定をご確認ください。" },
       { status: 500 },
     );
   }
+
+  await logSend("sent");
 
   // Record last_sent_at for scheduled sends to prevent duplicates.
   if (body.scheduled && settings?.id) {

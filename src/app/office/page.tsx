@@ -124,11 +124,10 @@ export default function OfficePage() {
     cancelClose();
     closeTimer.current = window.setTimeout(() => setPicked(null), 160);
   };
-  // "近づくと開く": a station's panel opens while the player stands in it.
-  function handleStation(id: "task" | "uchida", near: boolean) {
-    if (id === "task") setShowTasks(near);
-    else if (id === "uchida") setShowChat(near);
-  }
+  // Panels open/close by clicking the toggles — no need to walk over. Tasks and
+  // the 内田さん chat are mutually exclusive so they never overlap on the right.
+  const toggleTasks = () => { setShowChat(false); setShowTasks((v) => !v); };
+  const toggleChat = () => { setShowTasks(false); setShowChat((v) => !v); };
 
   function handlePick(species: string | null, x: number, y: number) {
     if (species) {
@@ -156,7 +155,6 @@ export default function OfficePage() {
         playerColor={playerColor}
         weather={effectiveWeather}
         onPickPlant={handlePick}
-        onStationChange={handleStation}
       />
 
       {/* Top-left: compact title + station toggles */}
@@ -167,17 +165,17 @@ export default function OfficePage() {
           </h1>
           <p className="mt-1 text-[11px] leading-relaxed text-[#a08a76]">
             <kbd className="rounded bg-black/5 px-1">WASD</kbd>/矢印で移動。
-            <b className="text-[#4a3b2f]">ステーションに近づく</b>とパネルが開きます🌟（完了 {done}/{total}）
+            下の<b className="text-[#4a3b2f]">ボタン</b>で進捗・内田さんを開けます（完了 {done}/{total}）
           </p>
           <div className="mt-2 flex gap-1.5">
             <button
-              onClick={() => setShowTasks((v) => !v)}
+              onClick={toggleTasks}
               className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showTasks ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
             >
               📋 進捗
             </button>
             <button
-              onClick={() => setShowChat((v) => !v)}
+              onClick={toggleChat}
               className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showChat ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
             >
               🤖 内田さん
@@ -206,7 +204,7 @@ export default function OfficePage() {
       )}
 
       {showChat && (
-        <div className="pointer-events-none absolute left-4 top-28 z-10">
+        <div className="pointer-events-none absolute right-4 top-28 z-10">
           <ChatPanel userName={playerName} onClose={() => setShowChat(false)} />
         </div>
       )}

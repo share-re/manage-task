@@ -22,14 +22,20 @@ function getTransport() {
 
 export async function sendMail(opts: {
   to: string[];
+  bcc?: string[];
   subject: string;
   text: string;
   html: string;
 }): Promise<void> {
   const transport = getTransport();
+  const bcc = opts.bcc ?? [];
+  // If there are no visible "To" addresses (a Bcc-only send), address the mail
+  // to the sender so it still has a valid To header.
+  const toList = opts.to.length > 0 ? opts.to.join(", ") : from;
   await transport.sendMail({
     from,
-    to: opts.to.join(", "),
+    to: toList,
+    bcc: bcc.length > 0 ? bcc.join(", ") : undefined,
     subject: opts.subject,
     text: opts.text,
     html: opts.html,

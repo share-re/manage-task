@@ -72,9 +72,14 @@ export function buildProgressSummary(
     if (t.status === "done") cur.done += 1;
     byAssignee.set(key, cur);
   }
-  const assignees = [...byAssignee.entries()].sort((a, b) =>
-    a[0] === "担当者なし" ? 1 : b[0] === "担当者なし" ? -1 : a[0].localeCompare(b[0]),
-  );
+  // Order: "全員" first, "担当者なし" last, everyone else by name.
+  const rank = (name: string) =>
+    name === "全員" ? 0 : name === "担当者なし" ? 2 : 1;
+  const assignees = [...byAssignee.entries()].sort((a, b) => {
+    const ra = rank(a[0]);
+    const rb = rank(b[0]);
+    return ra !== rb ? ra - rb : a[0].localeCompare(b[0]);
+  });
 
   const appUrl = process.env.APP_URL ?? "https://manage-task-drab.vercel.app";
 

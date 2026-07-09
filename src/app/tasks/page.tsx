@@ -22,6 +22,26 @@ function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
 }
 
+// Deadline badge for an incomplete task: overdue / due today / due within 3 days.
+// Returns null when there's nothing to warn about.
+function dueBadge(
+  task: Task,
+): { label: string; className: string } | null {
+  if (task.status === "done" || !task.due_date) return null;
+  const [y, m, d] = task.due_date.split("-").map(Number);
+  const dueMs = Date.UTC(y, m - 1, d);
+  const now = new Date();
+  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((dueMs - todayMs) / 86_400_000);
+  if (diff < 0)
+    return { label: `${-diff}日超過`, className: "bg-red-100 text-red-700" };
+  if (diff === 0)
+    return { label: "本日締切", className: "bg-red-100 text-red-700" };
+  if (diff <= 3)
+    return { label: `あと${diff}日`, className: "bg-amber-100 text-amber-700" };
+  return null;
+}
+
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", {
     month: "numeric",
@@ -96,8 +116,20 @@ function TaskRow({
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            {task.assignee || "担当者なし"} ・ {formatDue(task.due_date)}
+          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+            <span>
+              {task.assignee || "担当者なし"} ・ {formatDue(task.due_date)}
+            </span>
+            {(() => {
+              const badge = dueBadge(task);
+              return badge ? (
+                <span
+                  className={`rounded px-1.5 py-0.5 font-medium ${badge.className}`}
+                >
+                  {badge.label}
+                </span>
+              ) : null;
+            })()}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

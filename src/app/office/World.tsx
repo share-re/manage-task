@@ -250,8 +250,10 @@ export default function World({ progress, playerName, userId, playerColor, weath
           const { scale, ox, oy } = viewTransform(selfRef.current, canvas.clientWidth, canvas.clientHeight);
           const wx = (e.clientX - rect.left) / scale + ox;
           const wy = (e.clientY - rect.top) / scale + oy;
+          // Generous radius so clicking the board / 内田さん sprite (offset from
+          // the station's floor marker) still registers; stations are far apart.
           for (const s of STATIONS) {
-            if (Math.hypot(wx - s.x * T, wy - s.z * T) < s.r * T) { onStationClick(s.id); return; }
+            if (Math.hypot(wx - s.x * T, wy - s.z * T) < (s.r + 0.9) * T) { onStationClick(s.id); return; }
           }
         }}
       />

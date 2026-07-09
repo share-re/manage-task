@@ -979,13 +979,18 @@ export default function TasksPage() {
           <div className="flex flex-col gap-4 sm:flex-row">
             <label className="flex flex-1 flex-col gap-1">
               <span className="text-sm font-medium text-zinc-700">担当者</span>
-              <input
-                type="text"
+              <select
                 value={assignee}
                 onChange={(e) => setAssignee(e.target.value)}
-                placeholder="例：畠山"
                 className={inputClass}
-              />
+              >
+                <option value="">担当者なし</option>
+                {memberOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label className="flex flex-1 flex-col gap-1">

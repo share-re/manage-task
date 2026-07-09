@@ -13,14 +13,16 @@ npm run test:e2e        # E2E 全部（要ログイン。下記の env が必要
 
 ### 認証つき E2E（各画面の描画・console・スクショ）
 
-ログインは env 経由（コードにパスワードを書かない）。テスト用アカウントで:
+ログイン情報は **gitignore した `.env.test`** から読む（コードにも書かず、シェル履歴にも残さない）:
 
 ```bash
-# 例: 本番を対象に、テスト用アカウントでログインして各画面を検証
-TEST_EMAIL=you@example.com TEST_PASSWORD=... npm run test:e2e
-# 対象を変える場合（プレビュー/ローカル）
-E2E_BASE_URL=https://<preview>.vercel.app TEST_EMAIL=... TEST_PASSWORD=... npm run test:e2e
+cp .env.test.example .env.test   # 初回だけ
+#  .env.test を編集して TEST_EMAIL / TEST_PASSWORD を記入（テスト用アカウント）
+npm run test:e2e
 ```
+
+- `.env.test` は `.gitignore` 済み。`E2E_BASE_URL` を書けば対象（プレビュー/ローカル）も切替可。
+- 実行後は不要なら `.env.test` を消してOK。共有したテスト用パスワードはローテーション推奨。
 
 - `setup` プロジェクトが1回ログインしセッションを `tests/.auth/state.json` に保存 → `authed` が再利用。
 - `screens.spec.ts` は **非破壊**（各画面を開いて描画・console error 0 を確認し `evidence/<screen>/screenshots/after.png` と `console.json` を保存するのみ）。CRUD/送信などの破壊的操作は含めない（＝別途 opt-in で追加する）。

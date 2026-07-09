@@ -1,4 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import dotenv from "dotenv";
+
+// Load E2E credentials/config from a gitignored .env.test (so passwords never
+// land in shell history or the repo). Copy .env.test.example to get started.
+dotenv.config({ path: ".env.test" });
 
 // Target: production by default; override with E2E_BASE_URL for a preview/local.
 const baseURL = process.env.E2E_BASE_URL || "https://manage-task-drab.vercel.app";

@@ -38,8 +38,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
-# keep the template so others know which vars to set
+# keep the templates so others know which vars to set
 !.env.local.example
+!.env.test.example
 
 # vercel
 .vercel

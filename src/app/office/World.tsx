@@ -30,6 +30,8 @@ type Props = {
   // Fired when a station (task board / 内田さん) is clicked, so the page can open
   // the matching panel without having to walk over to it.
   onStationClick?: (id: StationId) => void;
+  // Fired on double-clicking a station, e.g. to navigate to its full page.
+  onStationDblClick?: (id: StationId) => void;
 };
 
 // What each client shares about itself over Realtime Presence.
@@ -51,7 +53,7 @@ const AI: Actor = {
   face: "down", ph: 5, ai: true, glasses: true,
 };
 
-export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange, onStationClick }: Props) {
+export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange, onStationClick, onStationDblClick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
   const moveTargetRef = useRef<{ x: number; z: number } | null>(null); // click-to-move goal
@@ -271,6 +273,18 @@ export default function World({ progress, playerName, userId, playerColor, weath
           }
           // Otherwise walk toward the clicked spot (parallel to WASD).
           moveTargetRef.current = { x: wx / T, z: wy / T };
+        }}
+        onDoubleClick={(e) => {
+          if (!onStationDblClick) return;
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const rect = canvas.getBoundingClientRect();
+          const { scale, ox, oy } = viewTransform(selfRef.current, canvas.clientWidth, canvas.clientHeight);
+          const wx = (e.clientX - rect.left) / scale + ox;
+          const wy = (e.clientY - rect.top) / scale + oy;
+          for (const s of STATIONS) {
+            if (Math.hypot(wx - s.x * T, wy - s.z * T) < (s.r + 0.9) * T) { onStationDblClick(s.id); return; }
+          }
         }}
       />
       <div className="pointer-events-none absolute bottom-5 right-5 grid grid-cols-3 grid-rows-2 gap-2 md:hidden">

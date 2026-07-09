@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
@@ -39,9 +40,11 @@ export default function OfficePage() {
     "あなた";
   const playerColor = colorFromId(userId);
 
+  const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showTasks, setShowTasks] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [confirmNav, setConfirmNav] = useState(false); // 進捗管理へ遷移する確認
   const [note, setNote] = useState<string>();
   const loadedRef = useRef(false);
 
@@ -161,6 +164,7 @@ export default function OfficePage() {
         weather={effectiveWeather}
         onPickPlant={handlePick}
         onStationClick={openStation}
+        onStationDblClick={(id) => { if (id === "task") setConfirmNav(true); }}
       />
 
       {/* Top-left: compact title + station toggles */}
@@ -225,6 +229,37 @@ export default function OfficePage() {
           onRequestClose={scheduleClose}
           onClose={() => setPicked(null)}
         />
+      )}
+
+      {confirmNav && (
+        <div
+          className="pointer-events-auto absolute inset-0 z-20 flex items-center justify-center bg-black/40"
+          onClick={() => setConfirmNav(false)}
+        >
+          <div
+            className="mx-4 max-w-xs rounded-2xl bg-[rgba(255,253,248,0.98)] p-5 shadow-xl ring-1 ring-[rgba(120,90,60,0.2)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-bold text-[#4a3b2f]">進捗管理画面に移動してもよろしいですか？</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-[#a08a76]">
+              バーチャルオフィスを離れて進捗管理（/tasks）を開きます。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmNav(false)}
+                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-[#a08a76] hover:bg-black/5"
+              >
+                いいえ
+              </button>
+              <button
+                onClick={() => router.push("/tasks")}
+                className="rounded-lg bg-[#2f9e77] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#268768]"
+              >
+                はい
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

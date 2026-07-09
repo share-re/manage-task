@@ -10,10 +10,12 @@ import {
   deleteTasks,
   listTasks,
   taskProgress,
+  updateTask,
   updateTaskStatus,
   STATUS_META,
   STATUS_ORDER,
   type Task,
+  type TaskEdit,
   type TaskStatus,
 } from "@/lib/tasks";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
@@ -66,6 +68,8 @@ function TaskRow({
   onToggleComments,
   onAddComment,
   onDelete,
+  memberOptions,
+  onSave,
 }: {
   task: Task;
   comments: TaskComment[];
@@ -77,9 +81,54 @@ function TaskRow({
   onToggleComments: (id: string) => void;
   onAddComment: (taskId: string, body: string) => Promise<void>;
   onDelete: (task: Task) => void;
+  memberOptions: string[];
+  onSave: (id: string, edit: TaskEdit) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
+
+  // Inline edit form state. Opened by the pencil button; seeded from the task.
+  const [editing, setEditing] = useState(false);
+  const [eTitle, setETitle] = useState(task.title);
+  const [eAssignee, setEAssignee] = useState(task.assignee ?? "");
+  const [eDue, setEDue] = useState(task.due_date ?? "");
+  const [eStatus, setEStatus] = useState<TaskStatus>(task.status);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string>();
+
+  const fieldClass =
+    "rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200";
+
+  function startEdit() {
+    setETitle(task.title);
+    setEAssignee(task.assignee ?? "");
+    setEDue(task.due_date ?? "");
+    setEStatus(task.status);
+    setEditError(undefined);
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    const title = eTitle.trim();
+    if (!title) {
+      setEditError("タイトルを入力してください。");
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await onSave(task.id, {
+        title,
+        assignee: eAssignee,
+        dueDate: eDue,
+        status: eStatus,
+      });
+      setEditing(false);
+    } catch {
+      setEditError("保存に失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   async function submitComment() {
     const body = draft.trim();
@@ -114,6 +163,17 @@ function TaskRow({
               <span className="shrink-0 rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
                 子 {childCount}
               </span>
+            )}
+            {!deleteMode && (
+              <button
+                type="button"
+                onClick={() => (editing ? setEditing(false) : startEdit())}
+                aria-label="編集"
+                aria-expanded={editing}
+                className="shrink-0 rounded-full px-1.5 py-0.5 text-sm text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              >
+                ✏️
+              </button>
             )}
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
@@ -168,6 +228,83 @@ function TaskRow({
         </div>
       </div>
 
+      {editing && (
+        <div className="border-t border-zinc-100 px-4 py-3">
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-zinc-600">
+                タイトル
+              </span>
+              <input
+                value={eTitle}
+                onChange={(e) => setETitle(e.target.value)}
+                className={fieldClass}
+              />
+            </label>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">
+                  担当者
+                </span>
+                <input
+                  list={`members-${task.id}`}
+                  value={eAssignee}
+                  onChange={(e) => setEAssignee(e.target.value)}
+                  placeholder="担当者なし"
+                  className={fieldClass}
+                />
+                <datalist id={`members-${task.id}`}>
+                  {memberOptions.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">期限</span>
+                <input
+                  type="date"
+                  value={eDue}
+                  onChange={(e) => setEDue(e.target.value)}
+                  className={fieldClass}
+                />
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">状態</span>
+                <select
+                  value={eStatus}
+                  onChange={(e) => setEStatus(e.target.value as TaskStatus)}
+                  className={fieldClass}
+                >
+                  {STATUS_ORDER.map((s) => (
+                    <option key={s} value={s}>
+                      {STATUS_META[s].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {editError && <p className="text-sm text-red-600">{editError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="rounded-lg border border-zinc-300 px-4 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={savingEdit}
+                className="rounded-lg bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+              >
+                {savingEdit ? "保存中…" : "保存する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {expanded && (
         <div className="border-t border-zinc-100 px-4 py-3">
           {comments.length === 0 ? (
@@ -203,6 +340,72 @@ function TaskRow({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// A completed task shown in the archive tab: read-only, with a restore button.
+// A parent with completed children can be expanded (onToggle) to reveal them.
+function ArchivedRow({
+  task,
+  onRestore,
+  childCount = 0,
+  expanded = false,
+  onToggle,
+  isChild = false,
+}: {
+  task: Task;
+  onRestore: (task: Task) => void;
+  childCount?: number;
+  expanded?: boolean;
+  onToggle?: () => void;
+  isChild?: boolean;
+}) {
+  const meta = (
+    <p className="mt-0.5 text-xs text-zinc-400">
+      {task.assignee || "担当者なし"}
+      {task.completed_at ? ` ・ 完了 ${formatDateTime(task.completed_at)}` : ""}
+    </p>
+  );
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 rounded-lg px-4 py-3 shadow-sm ring-1 ring-black/5 ${
+        isChild ? "bg-zinc-50" : "bg-white"
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        {onToggle ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className="flex w-full items-center gap-1.5 text-left"
+          >
+            <span className="shrink-0 text-zinc-400">
+              {expanded ? "▾" : "▸"}
+            </span>
+            <span className="truncate text-zinc-500 line-through">
+              {task.title}
+            </span>
+            <span className="shrink-0 rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+              子 {childCount}
+            </span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            {isChild && <span className="shrink-0 text-zinc-300">└</span>}
+            <p className="truncate text-zinc-500 line-through">{task.title}</p>
+          </div>
+        )}
+        {meta}
+      </div>
+      <button
+        type="button"
+        onClick={() => onRestore(task)}
+        className="shrink-0 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-50"
+      >
+        ↩ 未完了に戻す
+      </button>
     </div>
   );
 }
@@ -244,6 +447,15 @@ export default function TasksPage() {
   );
   const [sortKey, setSortKey] = useState<SortKey>("default");
 
+  // Which tab is shown: incomplete tasks vs. the completed archive.
+  const [tab, setTab] = useState<"open" | "archive">("open");
+  // Toggles the centered "変更を保存しました" dialog after an edit is saved.
+  const [savedModal, setSavedModal] = useState(false);
+  // Which archived parent tasks are expanded to reveal their completed children.
+  const [expandedArchive, setExpandedArchive] = useState<Set<string>>(
+    new Set(),
+  );
+
   // Today's date (YYYY-MM-DD, local) — the earliest allowed due date. Set in an
   // effect to avoid a server/client hydration mismatch.
   const [minDate, setMinDate] = useState("");
@@ -271,6 +483,13 @@ export default function TasksPage() {
       })
       .catch((err) => console.error("コメントの読み込みに失敗:", err));
   }, []);
+
+  // Auto-dismiss the save confirmation dialog after a short moment.
+  useEffect(() => {
+    if (!savedModal) return;
+    const id = setTimeout(() => setSavedModal(false), 2500);
+    return () => clearTimeout(id);
+  }, [savedModal]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -361,8 +580,43 @@ export default function TasksPage() {
     }
   }
 
+  // Save an inline edit. Throwing on failure lets the row show its own error;
+  // on success we refresh the row and pop the confirmation dialog.
+  async function handleUpdate(id: string, edit: TaskEdit) {
+    const updated = await updateTask(id, edit);
+    setTasks((ts) => ts.map((t) => (t.id === id ? updated : t)));
+    setSavedModal(true);
+  }
+
+  // Move a completed task back to "todo" (out of the archive).
+  async function handleRestore(task: Task) {
+    setTasks((ts) =>
+      ts.map((t) =>
+        t.id === task.id ? { ...t, status: "todo", completed_at: null } : t,
+      ),
+    );
+    try {
+      await updateTaskStatus(task.id, "todo");
+    } catch (err) {
+      console.error(err);
+      setTasks((ts) =>
+        ts.map((t) => (t.id === task.id ? { ...t, status: task.status } : t)),
+      );
+      setError("未完了に戻せませんでした。");
+    }
+  }
+
   function toggleComments(id: string) {
     setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleArchive(id: string) {
+    setExpandedArchive((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -411,6 +665,36 @@ export default function TasksPage() {
       [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[],
     [tasks],
   );
+  // Assignee suggestions for the picker: everyone already on a task, plus the
+  // signed-in user. (A profiles table would later let us list all members.)
+  const memberOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of tasks) if (t.assignee) set.add(t.assignee);
+    if (authorName) set.add(authorName);
+    return [...set];
+  }, [tasks, authorName]);
+
+  // Split by completion: incomplete tasks feed the tree/list; completed ones
+  // go to the archive tab (newest completion first).
+  const openTasks = useMemo(
+    () => tasks.filter((t) => t.status !== "done"),
+    [tasks],
+  );
+  const archivedTasks = useMemo(
+    () =>
+      tasks
+        .filter((t) => t.status === "done")
+        .sort((a, b) =>
+          (b.completed_at || "").localeCompare(a.completed_at || ""),
+        ),
+    [tasks],
+  );
+  // 2-level tree of the archive so a completed parent can reveal its completed
+  // children on click.
+  const archivedTree = useMemo(
+    () => buildTaskTree(archivedTasks),
+    [archivedTasks],
+  );
 
   const filtersActive =
     filterAssignee !== "" || filterStatus !== "" || sortKey !== "default";
@@ -418,12 +702,10 @@ export default function TasksPage() {
   // When filtering/sorting, show a flat list (the tree can't preserve an
   // arbitrary sort order). Otherwise show the 2-level tree.
   const flatList = useMemo(() => {
-    let list = tasks.slice();
+    let list = openTasks.slice();
     if (filterAssignee)
       list = list.filter((t) => (t.assignee || "") === filterAssignee);
-    if (filterStatus === "open")
-      list = list.filter((t) => t.status !== "done");
-    else if (filterStatus)
+    if (filterStatus && filterStatus !== "open")
       list = list.filter((t) => t.status === filterStatus);
     const comparators: Record<SortKey, (a: Task, b: Task) => number> = {
       default: () => 0,
@@ -435,9 +717,9 @@ export default function TasksPage() {
     };
     if (sortKey !== "default") list.sort(comparators[sortKey]);
     return list;
-  }, [tasks, filterAssignee, filterStatus, sortKey]);
+  }, [openTasks, filterAssignee, filterStatus, sortKey]);
 
-  const tree = useMemo(() => buildTaskTree(tasks), [tasks]);
+  const tree = useMemo(() => buildTaskTree(openTasks), [openTasks]);
   // Progress tracks the assignee filter: pick a person to see just their
   // progress, or "すべて" for the whole team. (Status filter is intentionally
   // ignored here — filtering to "done" would always read 100%.)
@@ -464,6 +746,8 @@ export default function TasksPage() {
       onToggleComments={toggleComments}
       onAddComment={handleAddComment}
       onDelete={handleDelete}
+      memberOptions={memberOptions}
+      onSave={handleUpdate}
     />
   );
 
@@ -508,8 +792,34 @@ export default function TasksPage() {
         </p>
       </div>
 
-      {/* Toolbar: add / delete buttons + filters/sort */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      {/* Sticky header: tabs + toolbar stay visible while the list scrolls. */}
+      <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-zinc-200 bg-zinc-50 px-4 pt-1">
+        <div className="flex gap-1">
+          {(
+            [
+              ["open", "未完了", openTasks.length],
+              ["archive", "アーカイブ", archivedTasks.length],
+            ] as const
+          ).map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-1 text-sm transition ${
+                tab === key
+                  ? "border-zinc-900 font-semibold text-zinc-900"
+                  : "border-transparent text-zinc-500 hover:text-zinc-700"
+              }`}
+            >
+              {label}
+              <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
+        {tab === "open" && (
+          <div className="flex flex-wrap items-center gap-2 py-3">
         <button
           type="button"
           onClick={() => setShowForm((v) => !v)}
@@ -520,13 +830,16 @@ export default function TasksPage() {
         <button
           type="button"
           onClick={() => setDeleteMode((v) => !v)}
-          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+          aria-label={deleteMode ? "削除モードを終了" : "削除モード"}
+          aria-pressed={deleteMode}
+          title={deleteMode ? "削除モードを終了" : "削除モード"}
+          className={`rounded-lg border px-2.5 py-2 text-sm leading-none transition ${
             deleteMode
-              ? "bg-red-600 text-white hover:bg-red-500"
-              : "border border-red-300 text-red-600 hover:bg-red-50"
+              ? "border-red-600 bg-red-600 text-white hover:bg-red-500"
+              : "border-red-300 text-red-600 hover:bg-red-50"
           }`}
         >
-          {deleteMode ? "× 削除を終了" : "🗑 削除"}
+          🗑
         </button>
 
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
@@ -552,8 +865,7 @@ export default function TasksPage() {
             className={`${inputClass} max-w-[8rem] py-1.5`}
           >
             <option value="">状態：すべて</option>
-            <option value="open">完了を隠す（未完のみ）</option>
-            {STATUS_ORDER.map((s) => (
+            {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
               <option key={s} value={s}>
                 {STATUS_META[s].label}
               </option>
@@ -571,12 +883,17 @@ export default function TasksPage() {
             <option value="status">状態順</option>
           </select>
         </div>
+          </div>
+        )}
       </div>
-      {deleteMode && (
-        <p className="mb-4 text-sm text-red-600">
-          削除モード中：各タスクの「×」で削除できます（親を消すと子も一緒に削除されます）。
-        </p>
-      )}
+
+      {tab === "open" && (
+        <>
+          {deleteMode && (
+            <p className="mb-4 text-sm text-red-600">
+              削除モード中：各タスクの「×」で削除できます（親を消すと子も一緒に削除されます）。
+            </p>
+          )}
 
       {/* Registration form (collapsible) */}
       {showForm && (
@@ -696,11 +1013,15 @@ export default function TasksPage() {
           </button>
         </form>
       )}
+        </>
+      )}
 
       {/* Task list */}
       <section>
         <h2 className="mb-3 text-lg font-semibold text-zinc-800">
-          タスク一覧（{filtersActive ? flatList.length : tasks.length}）
+          {tab === "archive"
+            ? `アーカイブ（${archivedTasks.length}）`
+            : `タスク一覧（${filtersActive ? flatList.length : openTasks.length}）`}
         </h2>
 
         {error && !showForm && (
@@ -709,9 +1030,46 @@ export default function TasksPage() {
 
         {!loaded ? (
           <p className="text-sm text-zinc-400">読み込み中…</p>
-        ) : tasks.length === 0 ? (
+        ) : tab === "archive" ? (
+          archivedTasks.length === 0 ? (
+            <p className="text-sm text-zinc-400">
+              完了したタスクはまだありません。
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {archivedTree.map(({ task: parent, children }) => (
+                <li key={parent.id}>
+                  <ArchivedRow
+                    task={parent}
+                    onRestore={handleRestore}
+                    childCount={children.length}
+                    expanded={expandedArchive.has(parent.id)}
+                    onToggle={
+                      children.length > 0
+                        ? () => toggleArchive(parent.id)
+                        : undefined
+                    }
+                  />
+                  {children.length > 0 && expandedArchive.has(parent.id) && (
+                    <ul className="mt-2 ml-5 flex flex-col gap-2 border-l-2 border-zinc-200 pl-4">
+                      {children.map((child) => (
+                        <li key={child.id}>
+                          <ArchivedRow
+                            task={child}
+                            onRestore={handleRestore}
+                            isChild
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
+        ) : openTasks.length === 0 ? (
           <p className="text-sm text-zinc-400">
-            まだタスクがありません。「＋ タスクを追加」から登録してみましょう。
+            未完了のタスクはありません。「＋ タスクを追加」から登録できます。
           </p>
         ) : filtersActive ? (
           // Flat, filtered/sorted view.
@@ -746,6 +1104,35 @@ export default function TasksPage() {
           </ul>
         )}
       </section>
+
+      {/* Centered confirmation after an edit is saved. */}
+      {savedModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSavedModal(false)}
+        >
+          <div
+            className="flex flex-col items-center gap-3 rounded-2xl bg-white px-8 py-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-2xl font-bold text-green-600">
+              ✓
+            </div>
+            <p className="text-base font-medium text-zinc-800">
+              変更を保存しました
+            </p>
+            <button
+              type="button"
+              onClick={() => setSavedModal(false)}
+              className="mt-1 rounded-lg bg-zinc-900 px-5 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

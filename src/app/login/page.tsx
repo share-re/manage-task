@@ -33,7 +33,7 @@ export default function LoginPage() {
       setLoading(false);
       return;
     }
-    router.replace("/");
+    router.replace("/office");
   }
 
   async function onPasskey() {
@@ -42,7 +42,7 @@ export default function LoginPage() {
     try {
       const { error } = await supabase.auth.signInWithPasskey();
       if (error) throw error;
-      router.replace("/");
+      router.replace("/office");
     } catch (err) {
       console.error(err);
       const { canceled, message } = describePasskeyError(err);

@@ -27,6 +27,7 @@ export default function Home() {
 
   // Entry cards for each feature (placeholder destinations for now).
   const features = [
+    { href: "/office", emoji: "🏢", title: "バーチャルオフィス", desc: "みんなで集まる森のオフィスを歩けます。" },
     { href: "/tasks", emoji: "✅", title: "進捗管理", desc: "タスクや作業状況を管理します。" },
     { href: "/assistant", emoji: "🤖", title: "AI内田さん", desc: "困ったときに相談できるAIです。" },
     { href: "/forest", emoji: "🌱", title: "植林", desc: "進捗が進むほど緑が育ちます。" },

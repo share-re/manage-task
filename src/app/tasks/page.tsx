@@ -19,6 +19,7 @@ import {
   type TaskStatus,
 } from "@/lib/tasks";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
+import { listMembers, memberLabel, type Member } from "@/lib/members";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
@@ -246,18 +247,21 @@ function TaskRow({
                 <span className="text-xs font-medium text-zinc-600">
                   担当者
                 </span>
-                <input
-                  list={`members-${task.id}`}
+                <select
                   value={eAssignee}
                   onChange={(e) => setEAssignee(e.target.value)}
-                  placeholder="担当者なし"
                   className={fieldClass}
-                />
-                <datalist id={`members-${task.id}`}>
-                  {memberOptions.map((m) => (
-                    <option key={m} value={m} />
+                >
+                  <option value="">担当者なし</option>
+                  {(eAssignee && !memberOptions.includes(eAssignee)
+                    ? [eAssignee, ...memberOptions]
+                    : memberOptions
+                  ).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </label>
               <label className="flex flex-1 flex-col gap-1">
                 <span className="text-xs font-medium text-zinc-600">期限</span>
@@ -426,6 +430,8 @@ export default function TasksPage() {
     Record<string, TaskComment[]>
   >({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Registered users for the assignee picker (from the profiles table).
+  const [members, setMembers] = useState<Member[]>([]);
 
   // Registration form — collapsed by default, opened with the "+" button.
   const [showForm, setShowForm] = useState(false);
@@ -482,6 +488,12 @@ export default function TasksPage() {
         setCommentsByTask(map);
       })
       .catch((err) => console.error("コメントの読み込みに失敗:", err));
+
+    // Registered users for the assignee picker. A missing profiles table
+    // (not yet created) shouldn't break the page — we fall back to past names.
+    listMembers()
+      .then(setMembers)
+      .catch((err) => console.error("メンバー一覧の読み込みに失敗:", err));
   }, []);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
@@ -665,14 +677,15 @@ export default function TasksPage() {
       [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[],
     [tasks],
   );
-  // Assignee suggestions for the picker: everyone already on a task, plus the
-  // signed-in user. (A profiles table would later let us list all members.)
+  // Assignee choices: registered users (profiles). Before profiles is
+  // populated, fall back to names already used on tasks plus the current user.
   const memberOptions = useMemo(() => {
+    if (members.length > 0) return members.map(memberLabel);
     const set = new Set<string>();
     for (const t of tasks) if (t.assignee) set.add(t.assignee);
     if (authorName) set.add(authorName);
     return [...set];
-  }, [tasks, authorName]);
+  }, [members, tasks, authorName]);
 
   // Split by completion: incomplete tasks feed the tree/list; completed ones
   // go to the archive tab (newest completion first).

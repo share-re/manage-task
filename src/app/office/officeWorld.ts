@@ -58,6 +58,47 @@ export type WorldState = {
   hour: number; // local time of day (0..24) for the window sun/sky
 };
 
+// Where a teammate stands when they arrive: a seat in one of the zones
+// (workspace desks, meeting table, lounge sofa, café counter) instead of
+// everyone stacking on one spawn spot. Each seat carries its zone so a future
+// presence status (作業中 / 休憩中 / 離席) can pick an anchor by zone — e.g.
+// 作業中 → a ワークスペース desk, 休憩中 → ラウンジ / カフェ.
+export type Seat = { x: number; z: number; face: Facing; zone: string };
+// Seats sit on OPEN floor just in front of each zone's furniture (not on top of
+// it), so the avatar reads as "at their spot" yet can always walk away — every
+// seat below is verified free with 3–4 escape directions against blocked().
+export const SEATS: Seat[] = [
+  // ワークスペース — standing at the desks, facing the screens.
+  { x: 14.0, z: 5.35, face: "up", zone: "ワークスペース" },
+  { x: 17.0, z: 5.35, face: "up", zone: "ワークスペース" },
+  { x: 20.0, z: 5.35, face: "up", zone: "ワークスペース" },
+  { x: 14.0, z: 8.05, face: "up", zone: "ワークスペース" },
+  { x: 17.0, z: 8.05, face: "up", zone: "ワークスペース" },
+  { x: 20.0, z: 8.05, face: "up", zone: "ワークスペース" },
+  // ミーティング — along the table, facing it.
+  { x: 4.8, z: 5.45, face: "up", zone: "ミーティング" },
+  { x: 5.8, z: 5.45, face: "up", zone: "ミーティング" },
+  { x: 6.6, z: 5.45, face: "up", zone: "ミーティング" },
+  // ラウンジ — around the sofa.
+  { x: 3.3, z: 10.5, face: "down", zone: "ラウンジ" },
+  { x: 4.6, z: 10.5, face: "down", zone: "ラウンジ" },
+  { x: 5.7, z: 10.6, face: "down", zone: "ラウンジ" },
+  { x: 2.1, z: 11.8, face: "right", zone: "ラウンジ" },
+  { x: 6.5, z: 11.8, face: "left", zone: "ラウンジ" },
+  // カフェ — at the counter.
+  { x: 20.4, z: 14.0, face: "up", zone: "カフェ" },
+  { x: 21.6, z: 14.0, face: "up", zone: "カフェ" },
+];
+
+// A stable seat per user (same hashing family as the shirt color) so everyone
+// keeps a consistent "home seat". With more users than seats, some may share
+// one — acceptable for a small team.
+export function seatForUser(id: string): Seat {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return SEATS[h % SEATS.length];
+}
+
 type Furn = { type: string; x: number; y: number; w: number; h: number; zk?: number };
 
 export const FURN: Furn[] = [

@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import {
   drawWorld,
   moveActor,
+  seatForUser,
   treeAt,
   STATIONS,
   type Actor,
@@ -48,8 +49,10 @@ const AI: Actor = {
 export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
+  // Arrive at a seat in one of the zones (see SEATS), not one shared spawn spot.
+  const seat = seatForUser(userId);
   const selfRef = useRef<Actor>({
-    x: 11.1, z: 12.0, name: playerName, shirt: playerColor, hair: HAIR, face: "up", ph: 0, self: true,
+    x: seat.x, z: seat.z, name: playerName, shirt: playerColor, hair: HAIR, face: seat.face, ph: 0, self: true,
   });
   const remotesRef = useRef<Map<string, Remote>>(new Map());
   const worldRef = useRef({ dispP: 0, targetP: 0 });

@@ -54,6 +54,7 @@ const AI: Actor = {
 export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange, onStationClick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
+  const moveTargetRef = useRef<{ x: number; z: number } | null>(null); // click-to-move goal
   // Arrive at a seat in one of the zones (see SEATS), not one shared spawn spot.
   const seat = seatForUser(userId);
   const selfRef = useRef<Actor>({
@@ -150,16 +151,27 @@ export default function World({ progress, playerName, userId, playerColor, weath
       last = now;
       const w = canvas!.clientWidth, h = canvas!.clientHeight;
       if (w > 0 && h > 0) {
-        // Move local player.
+        // Move local player: keyboard/D-pad (WASD) or a click-to-move target.
         const SPD = 3.4;
+        const me = selfRef.current;
         let dx = (keys.current.d ? 1 : 0) - (keys.current.a ? 1 : 0);
         let dz = (keys.current.s ? 1 : 0) - (keys.current.w ? 1 : 0);
-        if (dx && dz) { dx *= 0.707; dz *= 0.707; }
-        const me = selfRef.current;
+        if (dx || dz) {
+          moveTargetRef.current = null; // any key press cancels click-to-move
+          if (dx && dz) { dx *= 0.707; dz *= 0.707; }
+        } else if (moveTargetRef.current) {
+          const tx = moveTargetRef.current.x - me.x, tz = moveTargetRef.current.z - me.z;
+          const dist = Math.hypot(tx, tz);
+          if (dist < 0.12) moveTargetRef.current = null; // arrived
+          else { dx = tx / dist; dz = tz / dist; }
+        }
         me.moving = !!(dx || dz);
         if (me.moving) {
+          const px = me.x, pz = me.z;
           moveActor(me, dx * SPD * dt, dz * SPD * dt);
           me.face = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? "right" : "left") : dz > 0 ? "down" : "up";
+          // Blocked by furniture on the way to a click target → stop trying.
+          if (moveTargetRef.current && Math.hypot(me.x - px, me.z - pz) < 0.0005) moveTargetRef.current = null;
         }
         // "近づくと開く": open/close a panel as the player enters/leaves a station.
         for (const s of STATIONS) {
@@ -243,18 +255,22 @@ export default function World({ progress, playerName, userId, playerColor, weath
         }}
         onPointerLeave={() => onPickPlant?.(null, 0, 0)}
         onClick={(e) => {
-          if (!onStationClick) return;
           const canvas = canvasRef.current;
           if (!canvas) return;
           const rect = canvas.getBoundingClientRect();
           const { scale, ox, oy } = viewTransform(selfRef.current, canvas.clientWidth, canvas.clientHeight);
           const wx = (e.clientX - rect.left) / scale + ox;
           const wy = (e.clientY - rect.top) / scale + oy;
-          // Generous radius so clicking the board / 内田さん sprite (offset from
-          // the station's floor marker) still registers; stations are far apart.
-          for (const s of STATIONS) {
-            if (Math.hypot(wx - s.x * T, wy - s.z * T) < (s.r + 0.9) * T) { onStationClick(s.id); return; }
+          // A station click opens its panel (priority over walking). Generous
+          // radius so the board / 内田さん sprite (offset from the floor marker)
+          // still registers; stations are far apart.
+          if (onStationClick) {
+            for (const s of STATIONS) {
+              if (Math.hypot(wx - s.x * T, wy - s.z * T) < (s.r + 0.9) * T) { onStationClick(s.id); return; }
+            }
           }
+          // Otherwise walk toward the clicked spot (parallel to WASD).
+          moveTargetRef.current = { x: wx / T, z: wy / T };
         }}
       />
       <div className="pointer-events-none absolute bottom-5 right-5 grid grid-cols-3 grid-rows-2 gap-2 md:hidden">

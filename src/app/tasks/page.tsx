@@ -20,6 +20,7 @@ import {
 } from "@/lib/tasks";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
+import SkyHero from "@/components/SkyHero";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
@@ -52,6 +53,23 @@ function formatDateTime(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// Keyword search over task titles (case-insensitive, partial match). When a
+// child task matches, its parent is kept too so the hit stays in context.
+// Input order is preserved. An empty query returns the pool unchanged.
+function filterBySearch(pool: Task[], query: string): Task[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return pool;
+  const byId = new Map(pool.map((t) => [t.id, t]));
+  const keep = new Set<string>();
+  for (const t of pool) {
+    if (t.title.toLowerCase().includes(q)) {
+      keep.add(t.id);
+      if (t.parent_id && byId.has(t.parent_id)) keep.add(t.parent_id);
+    }
+  }
+  return pool.filter((t) => keep.has(t.id));
 }
 
 type SortKey = "default" | "due" | "assignee" | "status";
@@ -145,9 +163,10 @@ function TaskRow({
 
   return (
     <div
-      className={`rounded-lg shadow-sm ring-1 ring-black/5 ${
+      className={`rounded-lg border-l-4 shadow-sm ring-1 ring-black/5 ${
         isChild ? "bg-zinc-50" : "bg-white"
       }`}
+      style={{ borderLeftColor: STATUS_META[task.status].barColor }}
     >
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
@@ -300,7 +319,7 @@ function TaskRow({
                 type="button"
                 onClick={saveEdit}
                 disabled={savingEdit}
-                className="rounded-lg bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+                className="rounded-lg bg-[#3B6D11] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#2f5a0e] disabled:opacity-50"
               >
                 {savingEdit ? "保存中…" : "保存する"}
               </button>
@@ -337,7 +356,7 @@ function TaskRow({
               type="button"
               onClick={submitComment}
               disabled={posting || !draft.trim()}
-              className="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
+              className="rounded-lg bg-[#3B6D11] px-3 py-2 text-sm font-medium text-white transition hover:bg-[#2f5a0e] disabled:opacity-50"
             >
               {posting ? "送信中…" : "送信"}
             </button>
@@ -452,6 +471,8 @@ export default function TasksPage() {
     "",
   );
   const [sortKey, setSortKey] = useState<SortKey>("default");
+  // Free-text keyword search over task titles. Shared by both tabs.
+  const [search, setSearch] = useState("");
 
   // Which tab is shown: incomplete tasks vs. the completed archive.
   const [tab, setTab] = useState<"open" | "archive">("open");
@@ -702,15 +723,23 @@ export default function TasksPage() {
         ),
     [tasks],
   );
+  // Archive honors the keyword search too (both tabs are searchable).
+  const filteredArchive = useMemo(
+    () => filterBySearch(archivedTasks, search),
+    [archivedTasks, search],
+  );
   // 2-level tree of the archive so a completed parent can reveal its completed
   // children on click.
   const archivedTree = useMemo(
-    () => buildTaskTree(archivedTasks),
-    [archivedTasks],
+    () => buildTaskTree(filteredArchive),
+    [filteredArchive],
   );
 
   const filtersActive =
-    filterAssignee !== "" || filterStatus !== "" || sortKey !== "default";
+    filterAssignee !== "" ||
+    filterStatus !== "" ||
+    sortKey !== "default" ||
+    search.trim() !== "";
 
   // When filtering/sorting, show a flat list (the tree can't preserve an
   // arbitrary sort order). Otherwise show the 2-level tree.
@@ -720,6 +749,8 @@ export default function TasksPage() {
       list = list.filter((t) => (t.assignee || "") === filterAssignee);
     if (filterStatus && filterStatus !== "open")
       list = list.filter((t) => t.status === filterStatus);
+    // Keyword search on the title (keeps a matched child's parent for context).
+    list = filterBySearch(list, search);
     const comparators: Record<SortKey, (a: Task, b: Task) => number> = {
       default: () => 0,
       due: (a, b) =>
@@ -730,7 +761,7 @@ export default function TasksPage() {
     };
     if (sortKey !== "default") list.sort(comparators[sortKey]);
     return list;
-  }, [openTasks, filterAssignee, filterStatus, sortKey]);
+  }, [openTasks, filterAssignee, filterStatus, sortKey, search]);
 
   const tree = useMemo(() => buildTaskTree(openTasks), [openTasks]);
   // Progress tracks the assignee filter: pick a person to see just their
@@ -768,7 +799,8 @@ export default function TasksPage() {
     "rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200";
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
+    <div className="flex-1" style={{ background: "#EAF3FB" }}>
+      <main className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
         <div className="flex items-center gap-4">
@@ -784,26 +816,13 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Team-wide progress */}
-      <div className="mb-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-lg font-semibold text-zinc-800">
-            {progressLabel}
-          </h2>
-          <span className="text-sm text-zinc-500">
-            完了 {progress.done} / {progress.total}
-          </span>
-        </div>
-        <div className="mt-3 h-3 overflow-hidden rounded-full bg-zinc-100">
-          <div
-            className="h-full rounded-full bg-green-600 transition-all"
-            style={{ width: `${progress.percent}%` }}
-          />
-        </div>
-        <p className="mt-2 text-right text-sm font-medium text-zinc-700">
-          {progress.percent}%
-        </p>
-      </div>
+      {/* Team-wide progress (forest hero) */}
+      <SkyHero
+        done={progress.done}
+        total={progress.total}
+        percent={progress.percent}
+        label={progressLabel}
+      />
 
       {/* Sticky header: tabs + toolbar stay visible while the list scrolls. */}
       <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-zinc-200 bg-zinc-50 px-4 pt-1">
@@ -831,12 +850,35 @@ export default function TasksPage() {
             </button>
           ))}
         </div>
+        {/* Keyword search — available on both tabs. */}
+        <div className="py-3">
+          <div className="relative">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="タスク名で検索"
+              aria-label="タスク名で検索"
+              className={`${inputClass} w-full py-1.5 pr-9 text-sm`}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="検索をクリア"
+                className="absolute inset-y-0 right-2 my-auto flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
         {tab === "open" && (
-          <div className="flex flex-wrap items-center gap-2 py-3">
+          <div className="flex flex-wrap items-center gap-2 pb-3">
         <button
           type="button"
           onClick={() => setShowForm((v) => !v)}
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-700"
+          className="rounded-lg bg-[#3B6D11] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2f5a0e]"
         >
           {showForm ? "× 閉じる" : "＋ タスクを追加"}
         </button>
@@ -1025,7 +1067,7 @@ export default function TasksPage() {
           <button
             type="submit"
             disabled={saving || (bulkMode ? !bulkText.trim() : !title.trim())}
-            className="self-start rounded-lg bg-zinc-900 px-5 py-2 font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
+            className="self-start rounded-lg bg-[#3B6D11] px-5 py-2 font-medium text-white transition hover:bg-[#2f5a0e] disabled:opacity-50"
           >
             {saving ? "登録中…" : "登録する"}
           </button>
@@ -1038,7 +1080,7 @@ export default function TasksPage() {
       <section>
         <h2 className="mb-3 text-lg font-semibold text-zinc-800">
           {tab === "archive"
-            ? `アーカイブ（${archivedTasks.length}）`
+            ? `アーカイブ（${filteredArchive.length}）`
             : `タスク一覧（${filtersActive ? flatList.length : openTasks.length}）`}
         </h2>
 
@@ -1052,6 +1094,10 @@ export default function TasksPage() {
           archivedTasks.length === 0 ? (
             <p className="text-sm text-zinc-400">
               完了したタスクはまだありません。
+            </p>
+          ) : filteredArchive.length === 0 ? (
+            <p className="text-sm text-zinc-400">
+              条件に合うタスクはありません。
             </p>
           ) : (
             <ul className="flex flex-col gap-2">
@@ -1144,7 +1190,7 @@ export default function TasksPage() {
             <button
               type="button"
               onClick={() => setSavedModal(false)}
-              className="mt-1 rounded-lg bg-zinc-900 px-5 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              className="mt-1 rounded-lg bg-[#3B6D11] px-5 py-1.5 text-sm font-medium text-white hover:bg-[#2f5a0e]"
             >
               OK
             </button>
@@ -1152,5 +1198,6 @@ export default function TasksPage() {
         </div>
       )}
     </main>
+    </div>
   );
 }

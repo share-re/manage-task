@@ -26,18 +26,19 @@
 | 4 | [#17](https://github.com/share-re/manage-task/issues/17) | 定期メールの cron 配線 | 中 | メール/タスク担当と要調整 |
 | 5 | [#19](https://github.com/share-re/manage-task/issues/19) | トップ `/` を廃止し `/office` に一本化 | 小〜中 | #21 の続きに積む |
 | 6 | [#22](https://github.com/share-re/manage-task/issues/22) | office オンライン参加者の簡易チャット | 中 | なし（Realtime broadcast） |
-| 7 | [#16](https://github.com/share-re/manage-task/issues/16) | DBスキーマの migration 整備 | 中〜大 | ⑧の前提 |
-| 8 | [#23](https://github.com/share-re/manage-task/issues/23) | /forest を「季節のアルバム」に刷新 | 中〜大 | **#16 に依存**（`garden_album` を#16で用意） |
+| 7 | [#16](https://github.com/share-re/manage-task/issues/16) | DBスキーマの migration 整備 | — | **見送り**（単一プロジェクト運用のため。closed: not planned） |
+| 8 | [#23](https://github.com/share-re/manage-task/issues/23) | /forest を「季節のアルバム」に刷新 | 中〜大 | 依存なし（`garden_album` は Supabase 上で直接作成） |
 
 - **⑤#20・⑥#21** は office の「プロフィール小窓」（名前＋シャツ色＋ステータス）としてまとめて実装すると効率的。
-- **⑦#16 → ⑧#23** は順序固定。#23 の永続化テーブル `garden_album` を #16 の migration に含める。
+- **⑦#16 は見送り**（単一プロジェクト運用で再現性の必要性が薄いため）。⑧#23 は #16 に依存せず、`garden_album` は Supabase 上で直接作成する。
 - **④#17** はメール本文・タスクデータが別担当領域と重なるため、cron 配線範囲を事前すり合わせ。
 
 ## 4. 主要な決定事項
 
 ### 基盤
-- **DBスキーマ**: `tasks` / `task_comments` / `email_settings` / `email_send_log`（＋新規 `garden_album`）を
-  `supabase/migrations/` にコード化。RLS・Realtime設定も含める。
+- **DBスキーマ (#16)**: 当初は `supabase/migrations/` へのコード化を計画したが、**Supabase 単一プロジェクト運用**で
+  別環境の再現性が不要のため **見送り**（closed: not planned）。以降のスキーマ変更（`garden_album` 等）は
+  従来どおり Supabase 上で直接行う。
 - **定期メール**: Vercel Cron 等から `POST /api/send-summary`（`{scheduled:true}`, `CRON_SECRET`付き）を定期実行。
   古い重複実装 `supabase/functions/send-summary/` は一本化 or 削除（削除は事前確認）。
 - **環境変数**: `GEMINI_API_KEY`・`APP_URL` を含む全変数を例ファイルに用途コメント付きで記載。

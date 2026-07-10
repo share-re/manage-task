@@ -29,11 +29,11 @@ export type Task = {
 // display order, and the badge color can never drift apart across files.
 export const STATUS_META: Record<
   TaskStatus,
-  { label: string; badgeClass: string }
+  { label: string; badgeClass: string; barColor: string }
 > = {
-  todo: { label: "未着手", badgeClass: "bg-zinc-100 text-zinc-600" },
-  in_progress: { label: "進行中", badgeClass: "bg-blue-100 text-blue-700" },
-  done: { label: "完了", badgeClass: "bg-green-100 text-green-700" },
+  todo: { label: "未着手", badgeClass: "bg-zinc-100 text-zinc-600", barColor: "#B4B2A9" },
+  in_progress: { label: "進行中", badgeClass: "bg-blue-100 text-blue-700", barColor: "#378ADD" },
+  done: { label: "完了", badgeClass: "bg-green-200 text-green-800", barColor: "#3B6D11" },
 };
 
 export const STATUS_ORDER: TaskStatus[] = [...TASK_STATUSES];

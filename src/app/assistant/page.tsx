@@ -21,6 +21,7 @@ export default function AssistantPage() {
   const [loading, setLoading] = useState(false); // 返答待ちかどうか
   const [error, setError] = useState<string>(); // エラー文言
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null); // コピー済みの吹き出し
+  const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
 
   // 自動スクロール用。ユーザーが上に遡っているときは追従しない。
   const listRef = useRef<HTMLDivElement>(null);
@@ -104,6 +105,10 @@ export default function AssistantPage() {
     setInput(""); // いったん空に（失敗したら下で戻す）
     setLoading(true);
 
+    // 生成中のリクエストを止められるようにする（停止ボタン用）。
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     // 失敗時に「送った吹き出しを消して、入力欄に文を戻す」ための後始末。
     const revert = () => {
       setMessages((prev) =>
@@ -119,6 +124,7 @@ export default function AssistantPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, history, userName }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -168,26 +174,41 @@ export default function AssistantPage() {
       })();
 
       // 受信ループ：届いた分を acc に足すだけ（表示は typer が担当）。
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
+      // 停止ボタンで中断された場合は、正常な停止として扱う（エラーにしない）。
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) throw err; // 本物のエラーは外の catch へ
       }
-      streamDone = true;
+      streamDone = true; // ここまで受信した分を typer が出し切って終わる
       await typer;
 
-      if (!started) {
+      // 停止で中断したときは「応答なし」を出さない。
+      if (!started && !controller.signal.aborted) {
         setMessages((prev) => [
           ...prev,
           { role: "model", text: "（応答がありませんでした）" },
         ]);
       }
     } catch {
-      setError("通信に失敗しました。ネットワークを確認してください。");
-      revert();
+      // 停止ボタンによる中断はエラー扱いしない（受信済みの分はそのまま残す）。
+      if (!controller.signal.aborted) {
+        setError("通信に失敗しました。ネットワークを確認してください。");
+        revert();
+      }
     } finally {
       setLoading(false);
+      abortRef.current = null;
     }
+  }
+
+  // 生成を途中で止める（停止ボタン）。受信済みの文章はそのまま残す。
+  function stop() {
+    abortRef.current?.abort();
   }
 
   // textarea のキー操作：Shift+Enterで送信、Enterは改行（そのまま）。
@@ -498,13 +519,32 @@ export default function AssistantPage() {
           placeholder="メッセージを入力…（Shift+Enterで送信）"
           className="max-h-32 flex-1 resize-none rounded-lg border border-emerald-600/20 bg-white/80 px-3 py-2 text-zinc-900 shadow-sm outline-none backdrop-blur focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 disabled:bg-zinc-100/80"
         />
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-lg bg-emerald-600 px-5 py-2 font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
-        >
-          送信
-        </button>
+        {loading ? (
+          <button
+            type="button"
+            onClick={stop}
+            aria-label="生成を停止"
+            className="flex items-center gap-1 rounded-lg bg-zinc-600 px-5 py-2 font-medium text-white shadow-sm transition hover:bg-zinc-700"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+            停止
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="rounded-lg bg-emerald-600 px-5 py-2 font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+          >
+            送信
+          </button>
+        )}
       </form>
       </main>
     </div>

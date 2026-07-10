@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type GroundingMetadata } from "@google/genai";
 import { UCHIDA_SYSTEM_PROMPT } from "@/lib/uchidaPrompt";
 
 // このAPIはサーバ側で動かす（鍵をブラウザに出さないため）。
@@ -8,6 +8,31 @@ export const runtime = "nodejs";
 // クライアントから送られてくる会話履歴の1件分の形。
 // role は "user"（利用者）か "model"（AI内田さん）のどちらか。
 type ChatTurn = { role: "user" | "model"; text: string };
+
+// 本文と「出典情報(JSON)」を1本のストリームで送るときの区切り記号。
+// 制御文字(U+001E)なので、AIの文章とは絶対に衝突しない。
+const SOURCES_SEP = "\x1e";
+
+// grounding（検索の裏取り情報）から、画面に出す最小限の出典データだけを取り出す。
+// 出典も Search Suggestions(HTML) も無ければ null を返す（何も付けない）。
+function buildSourcesMeta(gm: GroundingMetadata | undefined) {
+  if (!gm) return null;
+  const sources = (gm.groundingChunks ?? [])
+    .map((c) => ({ title: c.web?.title ?? "", uri: c.web?.uri ?? "" }))
+    .filter((s) => s.uri); // URLがあるものだけ残す
+  const suggestions = gm.searchEntryPoint?.renderedContent ?? "";
+  if (sources.length === 0 && !suggestions) return null;
+  return { sources, suggestions };
+}
+
+// Geminiの「利用上限」エラー（HTTP 429 / RESOURCE_EXHAUSTED）かどうかを見分ける。
+// 無料枠の1日の上限に達したときはこれが投げられる。
+function isQuotaError(err: unknown): boolean {
+  const status = (err as { status?: unknown })?.status;
+  if (status === 429) return true;
+  const s = String(err instanceof Error ? err.message : err);
+  return s.includes("429") || s.includes("RESOURCE_EXHAUSTED") || s.includes("quota");
+}
 
 export async function POST(req: Request) {
   // 鍵が未設定なら、原因が分かるメッセージを返して終了する。
@@ -82,10 +107,21 @@ export async function POST(req: Request) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        // 検索が走ったときの「出典情報」を、受信ループの中で拾っておく。
+        let grounding: GroundingMetadata | undefined;
         try {
           for await (const chunk of result) {
             const text = chunk.text;
             if (text) controller.enqueue(encoder.encode(text)); // 届いた分だけ流す
+            // チャンクに出典情報が付いていれば、最新のものを覚えておく。
+            const gm = chunk.candidates?.[0]?.groundingMetadata;
+            if (gm) grounding = gm;
+          }
+          // 本文を流し切ったあと、出典があれば「区切り記号＋JSON」を末尾に付ける。
+          // 画面側はこの区切り記号で、本文と出典を切り分ける。
+          const meta = buildSourcesMeta(grounding);
+          if (meta) {
+            controller.enqueue(encoder.encode(SOURCES_SEP + JSON.stringify(meta)));
           }
         } catch (err) {
           // 途中でGemini側が落ちたら、印を1行入れて終わる。
@@ -109,6 +145,16 @@ export async function POST(req: Request) {
   } catch (err) {
     // ストリーム開始前のエラー（レート上限・鍵ミス等）はJSONで返す。
     console.error("Gemini API error:", err);
+    // 無料枠の1日の上限（429）は、原因が分かるように専用の文言で返す。
+    if (isQuotaError(err)) {
+      return Response.json(
+        {
+          error:
+            "今日はAIの利用上限に達しました。明日また試してください。（無料枠の1日あたりの上限）",
+        },
+        { status: 429 },
+      );
+    }
     return Response.json(
       { error: "AIの応答に失敗しました。少し待って、もう一度お試しください。" },
       { status: 502 },

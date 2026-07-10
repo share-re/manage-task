@@ -6,8 +6,27 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "@/components/AuthProvider";
 
+// 検索の裏取りに使った参照元（出典）1件分。
+type Source = { title: string; uri: string };
+
 // 会話1件分。role は "user"（自分）か "model"（AI内田さん）。
-type Msg = { role: "user" | "model"; text: string };
+// AIの返答が検索を使ったときは、出典(sources)と検索候補(suggestions=GoogleのHTML)が付く。
+type Msg = {
+  role: "user" | "model";
+  text: string;
+  sources?: Source[];
+  suggestions?: string;
+};
+
+// 本文と出典(JSON)を1本のストリームで送るときの区切り記号（サーバ側と一致させる）。
+const SOURCES_SEP = "\x1e";
+
+// 受信した塊を「本文」と「出典JSONの生文字列」に切り分ける。
+function splitAcc(acc: string): { textPart: string; metaRaw: string } {
+  const i = acc.indexOf(SOURCES_SEP);
+  if (i === -1) return { textPart: acc, metaRaw: "" };
+  return { textPart: acc.slice(0, i), metaRaw: acc.slice(i + SOURCES_SEP.length) };
+}
 
 export default function AssistantPage() {
   const { session } = useAuth();
@@ -93,24 +112,39 @@ export default function AssistantPage() {
     </button>
   );
 
-  // 送信本体（送信ボタン・Enterキーの両方から呼ぶ）。
-  async function send() {
-    const text = input.trim();
+  // 送信本体（送信ボタン・Enterキー・「賢く答え直して」から呼ぶ）。
+  // retryText を渡すと「再送信」＝新しい吹き出しを足さず、直前のAI返答を捨てて同じ質問を送り直す。
+  // useSmartModel=true のときだけ上位モデル(Flash)を使う。
+  async function send(opts?: { retryText?: string; useSmartModel?: boolean }) {
+    const isRetry = opts?.retryText !== undefined;
+    const useSmartModel = opts?.useSmartModel ?? false;
+    const text = (opts?.retryText ?? input).trim();
     if (!text || loading) return; // 空・返答待ちのときは何もしない
 
     setError(undefined);
+
     // サーバに渡す履歴は「今回の発言を含まない、これまでのやりとり」。
-    const history = messages;
-    setMessages((prev) => [...prev, { role: "user", text }]);
-    setInput(""); // いったん空に（失敗したら下で戻す）
+    let history: Msg[];
+    if (isRetry) {
+      // 再送信：末尾のユーザー発言を探し、それより後（＝捨てるAI返答）を消す。
+      const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
+      history = messages.slice(0, lastUserIdx); // その質問より前
+      setMessages(messages.slice(0, lastUserIdx + 1)); // 質問までを残しAI返答を削除
+    } else {
+      history = messages;
+      setMessages((prev) => [...prev, { role: "user", text }]);
+      setInput(""); // いったん空に（失敗したら下で戻す）
+    }
     setLoading(true);
 
     // 生成中のリクエストを止められるようにする（停止ボタン用）。
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // 失敗時に「送った吹き出しを消して、入力欄に文を戻す」ための後始末。
+    // 失敗時の後始末。通常送信は「吹き出しを消して入力欄に文を戻す」。
+    // 再送信は質問をそのまま残す（消さない）。
     const revert = () => {
+      if (isRetry) return;
       setMessages((prev) =>
         prev[prev.length - 1]?.role === "user" && prev[prev.length - 1]?.text === text
           ? prev.slice(0, -1)
@@ -123,7 +157,7 @@ export default function AssistantPage() {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history, userName }),
+        body: JSON.stringify({ message: text, history, userName, useSmartModel }),
         signal: controller.signal,
       });
 
@@ -148,7 +182,7 @@ export default function AssistantPage() {
       const typer = (async () => {
         const INTERVAL = 70; // 1コマの間隔(ms)。大きいほどゆっくり打つ
         while (true) {
-          const glyphs = Array.from(acc); // 日本語や絵文字も1文字として扱う
+          const glyphs = Array.from(splitAcc(acc).textPart); // 本文だけ（出典は除く）を1文字扱い
           const total = glyphs.length;
           if (shown < total) {
             shown = Math.min(
@@ -187,6 +221,31 @@ export default function AssistantPage() {
       streamDone = true; // ここまで受信した分を typer が出し切って終わる
       await typer;
 
+      // 本文の後ろに出典JSONが来ていれば、解析して最後のAI吹き出しに付ける。
+      const { metaRaw } = splitAcc(acc);
+      if (metaRaw && started) {
+        try {
+          const meta = JSON.parse(metaRaw) as {
+            sources?: Source[];
+            suggestions?: string;
+          };
+          setMessages((prev) => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last?.role === "model") {
+              copy[copy.length - 1] = {
+                ...last,
+                sources: meta.sources ?? [],
+                suggestions: meta.suggestions ?? "",
+              };
+            }
+            return copy;
+          });
+        } catch {
+          // 出典の解析に失敗しても、本文は表示済みなので無視する。
+        }
+      }
+
       // 停止で中断したときは「応答なし」を出さない。
       if (!started && !controller.signal.aborted) {
         setMessages((prev) => [
@@ -209,6 +268,14 @@ export default function AssistantPage() {
   // 生成を途中で止める（停止ボタン）。受信済みの文章はそのまま残す。
   function stop() {
     abortRef.current?.abort();
+  }
+
+  // 「賢く答え直して」：直前の質問を、上位モデル(Flash)で送り直す。
+  function retryWithSmart() {
+    if (loading) return;
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    send({ retryText: lastUser.text, useSmartModel: true });
   }
 
   // textarea のキー操作：Shift+Enterで送信、Enterは改行（そのまま）。
@@ -483,8 +550,46 @@ export default function AssistantPage() {
               <div className="max-w-[80%] rounded-2xl bg-white/90 px-4 py-2 text-sm text-zinc-900 shadow-sm ring-1 ring-black/5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-200/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-bold [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-100 [&_pre]:p-3 [&_pre]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-bold [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5">
                 <Markdown remarkPlugins={[remarkGfm]}>{m.text}</Markdown>
               </div>
+              {/* 検索を使ったときの「参照元（出典）」。無いときは表示しない。 */}
+              {m.sources && m.sources.length > 0 && (
+                <div className="mt-1 max-w-[80%] text-xs text-emerald-800/70">
+                  <p className="font-medium">参照</p>
+                  <ul className="list-disc pl-4">
+                    {m.sources.map((s, k) => (
+                      <li key={k}>
+                        <a
+                          href={s.uri}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline hover:text-emerald-700"
+                        >
+                          {s.title || s.uri}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {/* Googleの検索候補（Search Suggestions）。利用規約で表示が求められるHTMLをそのまま描画。 */}
+              {m.suggestions && (
+                <div
+                  className="mt-1 max-w-[80%]"
+                  dangerouslySetInnerHTML={{ __html: m.suggestions }}
+                />
+              )}
               {/* コピー ボタン（アイコン） */}
               {copyButton(m.text, i)}
+              {/* 直前のAI返答にだけ「賢く答え直して」を出す（生成中は隠す）。 */}
+              {i === messages.length - 1 && !loading && (
+                <button
+                  type="button"
+                  onClick={retryWithSmart}
+                  title="上位モデル(Flash)で答え直します"
+                  className="mt-1 rounded-full px-2 py-0.5 text-xs text-emerald-700 ring-1 ring-emerald-600/30 transition hover:bg-emerald-50"
+                >
+                  🧠 賢く答え直して
+                </button>
+              )}
             </div>
           ),
         )}

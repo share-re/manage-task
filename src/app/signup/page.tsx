@@ -63,7 +63,7 @@ export default function SignupPage() {
               className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
             />
             <span className="text-xs text-zinc-400">
-              トップ画面の「ようこそ ○○さん」に表示されます
+              オフィス画面など、アプリ内で表示される名前です
             </span>
           </label>
 

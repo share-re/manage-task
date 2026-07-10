@@ -602,6 +602,40 @@ export default function TasksPage() {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: next } : t)));
     try {
       await updateTaskStatus(id, next);
+      // Auto-sync the parent: when every child is done, archive the parent;
+      // when a child is reopened, bring the parent back out of the archive.
+      const changed = tasks.find((t) => t.id === id);
+      if (changed?.parent_id) {
+        const parentId = changed.parent_id;
+        const parent = tasks.find((t) => t.id === parentId);
+        const siblings = tasks.filter((t) => t.parent_id === parentId);
+        const allDone = siblings.every(
+          (t) => (t.id === id ? next : t.status) === "done",
+        );
+        if (parent && allDone && parent.status !== "done") {
+          await updateTaskStatus(parentId, "done");
+          setTasks((ts) =>
+            ts.map((t) =>
+              t.id === parentId
+                ? {
+                    ...t,
+                    status: "done",
+                    completed_at: new Date().toISOString(),
+                  }
+                : t,
+            ),
+          );
+        } else if (parent && !allDone && parent.status === "done") {
+          await updateTaskStatus(parentId, "todo");
+          setTasks((ts) =>
+            ts.map((t) =>
+              t.id === parentId
+                ? { ...t, status: "todo", completed_at: null }
+                : t,
+            ),
+          );
+        }
+      }
     } catch (err) {
       console.error(err);
       if (previous !== undefined) {
@@ -630,6 +664,20 @@ export default function TasksPage() {
     );
     try {
       await updateTaskStatus(task.id, "todo");
+      // If this restored child has an archived parent, restore the parent too.
+      if (task.parent_id) {
+        const parent = tasks.find((t) => t.id === task.parent_id);
+        if (parent && parent.status === "done") {
+          await updateTaskStatus(task.parent_id, "todo");
+          setTasks((ts) =>
+            ts.map((t) =>
+              t.id === task.parent_id
+                ? { ...t, status: "todo", completed_at: null }
+                : t,
+            ),
+          );
+        }
+      }
     } catch (err) {
       console.error(err);
       setTasks((ts) =>

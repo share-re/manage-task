@@ -24,7 +24,7 @@
 | 2 | [#20](https://github.com/share-re/manage-task/issues/20) | office アバターに在席ステータス | 小 | なし（Presence拡張） |
 | 3 | [#21](https://github.com/share-re/manage-task/issues/21) | 表示名を office から変更 | 小 | なし |
 | 4 | [#17](https://github.com/share-re/manage-task/issues/17) | 定期メールの cron 配線 | 中 | メール/タスク担当と要調整 |
-| 5 | [#19](https://github.com/share-re/manage-task/issues/19) | トップ `/` を軽量ダッシュボードに | 中 | なし |
+| 5 | [#19](https://github.com/share-re/manage-task/issues/19) | トップ `/` を廃止し `/office` に一本化 | 小〜中 | #21 の続きに積む |
 | 6 | [#22](https://github.com/share-re/manage-task/issues/22) | office オンライン参加者の簡易チャット | 中 | なし（Realtime broadcast） |
 | 7 | [#16](https://github.com/share-re/manage-task/issues/16) | DBスキーマの migration 整備 | 中〜大 | ⑧の前提 |
 | 8 | [#23](https://github.com/share-re/manage-task/issues/23) | /forest を「季節のアルバム」に刷新 | 中〜大 | **#16 に依存**（`garden_album` を#16で用意） |
@@ -41,6 +41,12 @@
 - **定期メール**: Vercel Cron 等から `POST /api/send-summary`（`{scheduled:true}`, `CRON_SECRET`付き）を定期実行。
   古い重複実装 `supabase/functions/send-summary/` は一本化 or 削除（削除は事前確認）。
 - **環境変数**: `GEMINI_API_KEY`・`APP_URL` を含む全変数を例ファイルに用途コメント付きで記載。
+
+### #19 トップ `/` の扱い
+- **案A：`/` を廃止し `/office` に一本化**（案B＝マイページ化＝担当ダッシュボード＋ユーザー設定、は比較の上で不採用）。
+- `/` → `/office` リダイレクト（ページ削除はしない）。**ログアウト・パスキー登録を office のプロフィール枠へ移設**
+  （現状 `/` にしか無く、廃止すると失われるため必須）。アプリ内の「← トップ」リンクは全て `/office` へ。office の 🏠 は撤去。
+- 自分の担当タスクのダッシュボードは今回スコープ外（将来 office パネルとして別 issue）。
 
 ### ④ /forest「季節のアルバム」（目玉）
 - **コンセプト**: タスク完了＝その季節の植物が office に生える → 保持期間経過で消え、forest の「アルバム」へ移動。

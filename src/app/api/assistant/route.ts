@@ -20,7 +20,12 @@ export async function POST(req: Request) {
   }
 
   // リクエストの中身（JSON）を取り出す。壊れていたら400で返す。
-  let body: { message?: unknown; history?: unknown; userName?: unknown };
+  let body: {
+    message?: unknown;
+    history?: unknown;
+    userName?: unknown;
+    useSmartModel?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -35,6 +40,12 @@ export async function POST(req: Request) {
 
   // 相手の名前（ログイン中のユーザー名）。あれば人格に伝えて「〇〇さん」と呼ばせる。
   const userName = typeof body.userName === "string" ? body.userName.trim() : "";
+
+  // 使うモデルを選ぶ。
+  // ふだんは軽い Flash-Lite（1日に使える回数が多い＝429で止まりにくい）。
+  // 画面の「賢く答え直して」ボタンが押されたときだけ、賢い Flash に一時的に切り替える。
+  const useSmartModel = body.useSmartModel === true;
+  const model = useSmartModel ? "gemini-2.5-flash" : "gemini-2.5-flash-lite";
 
   // これまでの会話履歴を、Geminiが受け取れる形（role + parts）に整える。
   // 想定外のデータが混ざっても落ちないよう、型を確かめながら変換する。
@@ -54,8 +65,13 @@ export async function POST(req: Request) {
 
     // 人格プロンプトを systemInstruction（土台の指示）として渡し、履歴も渡す。
     const chat = ai.chats.create({
-      model: "gemini-2.5-flash",
-      config: { systemInstruction },
+      model,
+      // Google検索ツールを持たせる。使うかどうかは Gemini が自分で判断する（AI判断型）。
+      // 事実確認や最新情報が要る質問のときだけ検索が走り、ふつうの雑談では走らない。
+      config: {
+        systemInstruction,
+        tools: [{ googleSearch: {} }],
+      },
       history,
     });
 

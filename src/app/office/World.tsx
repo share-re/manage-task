@@ -71,13 +71,13 @@ export default function World({ progress, playerName, userId, playerColor, statu
   const weatherRef = useRef<Weather>(weather);
   const nearRef = useRef<Record<StationId, boolean>>({ task: false, uchida: false });
   const onStationRef = useRef(onStationChange);
-  const statusDirtyRef = useRef(false); // set when the user changes status → re-track now
+  const metaDirtyRef = useRef(false); // set when self meta (status / name) changes → re-track now
 
   useEffect(() => { worldRef.current.targetP = progress; }, [progress]);
   useEffect(() => { weatherRef.current = weather; }, [weather]);
   useEffect(() => { onStationRef.current = onStationChange; });
-  useEffect(() => { selfRef.current.name = playerName; selfRef.current.shirt = playerColor; }, [playerName, playerColor]);
-  useEffect(() => { selfRef.current.status = status; statusDirtyRef.current = true; }, [status]);
+  useEffect(() => { selfRef.current.name = playerName; selfRef.current.shirt = playerColor; metaDirtyRef.current = true; }, [playerName, playerColor]);
+  useEffect(() => { selfRef.current.status = status; metaDirtyRef.current = true; }, [status]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -210,9 +210,9 @@ export default function World({ progress, playerName, userId, playerColor, statu
         sinceTrack += dt;
         const justStopped = wasMoving && !me.moving;
         wasMoving = me.moving;
-        if (justStopped || sinceTrack > 4 || statusDirtyRef.current) {
+        if (justStopped || sinceTrack > 4 || metaDirtyRef.current) {
           sinceTrack = 0;
-          statusDirtyRef.current = false;
+          metaDirtyRef.current = false;
           channel.track({
             x: me.x, z: me.z, face: me.face, moving: false,
             name: me.name, shirt: me.shirt, hair: me.hair, status: me.status ?? "working",

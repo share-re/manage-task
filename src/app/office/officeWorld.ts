@@ -19,6 +19,9 @@ export const MAPH = ROWS * T;
 
 export type Facing = "up" | "down" | "left" | "right";
 
+// Presence status a teammate can set for themselves in the office.
+export type PresenceStatus = "working" | "busy" | "away" | "break";
+
 export type Actor = {
   x: number;
   z: number;
@@ -31,6 +34,7 @@ export type Actor = {
   self?: boolean;
   ai?: boolean;
   glasses?: boolean;
+  status?: PresenceStatus;
   tx?: number;
   tz?: number;
 };
@@ -89,6 +93,30 @@ export const SEATS: Seat[] = [
   { x: 20.4, z: 14.0, face: "up", zone: "カフェ" },
   { x: 21.6, z: 14.0, face: "up", zone: "カフェ" },
 ];
+
+// Presence status a teammate sets. Their avatar is parked in the matching zone
+// so the room reads at a glance (作業中 → desks, 休憩 → café, ...).
+export const STATUS_EMOJI: Record<PresenceStatus, string> = {
+  working: "🟢", busy: "⛔", break: "☕", away: "🟡",
+};
+export const STATUS_LABEL: Record<PresenceStatus, string> = {
+  working: "作業中", busy: "取込中", break: "休憩", away: "離席",
+};
+export const STATUS_ORDER: PresenceStatus[] = ["working", "busy", "break", "away"];
+const STATUS_ZONE: Record<PresenceStatus, string> = {
+  working: "ワークスペース", busy: "ミーティング", break: "カフェ", away: "ラウンジ",
+};
+
+// Pick a stable seat for a user within the zone their status parks them in, so
+// remote teammates cluster by what they're doing. Distinct seat per user via the
+// same hashing family as the shirt color; more users than a zone's seats share.
+export function seatForStatus(id: string, status: PresenceStatus): Seat {
+  const pool = SEATS.filter((s) => s.zone === STATUS_ZONE[status]);
+  const seats = pool.length ? pool : SEATS;
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return seats[h % seats.length];
+}
 
 // A stable seat per user (same hashing family as the shirt color) so everyone
 // keeps a consistent "home seat". With more users than seats, some may share
@@ -390,7 +418,7 @@ function drawChar(ctx: CanvasRenderingContext2D, a: Actor, t: number) {
     ctx.fillStyle = "rgba(240,130,110,0.35)"; ctx.beginPath(); ctx.arc(px - 7.5 + off, hy + 6, 2.6, 0, 7); ctx.arc(px + 7.5 + off, hy + 6, 2.6, 0, 7); ctx.fill();
   }
   ctx.font = "600 11px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  const label = a.ai ? "🤖 " + a.name : a.name;
+  const label = a.ai ? "🤖 " + a.name : (a.status ? STATUS_EMOJI[a.status] + " " : "") + a.name;
   const tw = ctx.measureText(label).width;
   ctx.fillStyle = a.ai ? "rgba(20,80,60,0.72)" : "rgba(50,30,15,0.55)";
   rr(ctx, px - tw / 2 - 6, py + 9, tw + 12, 16, 8); ctx.fill();

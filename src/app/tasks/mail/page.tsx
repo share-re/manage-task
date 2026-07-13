@@ -167,31 +167,79 @@ export default function MailSettingsPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-zinc-900">メール共有の設定</h1>
+    <div className="flex-1" style={{ background: "#EAF3FB" }}>
+      <main className="mx-auto w-full max-w-2xl px-4 py-8">
+      {/* Sky hero header (森テーマ：流れる雲・揺れる太陽・蝶) */}
+      <div
+        className="relative mb-6 overflow-hidden rounded-2xl shadow-sm ring-1 ring-black/5"
+        style={{ background: "linear-gradient(180deg, #CDE4FA, #EAF3FB)" }}
+      >
+        <style>{`
+          @keyframes mailDrift { from { transform: translateX(-50px); } to { transform: translateX(560px); } }
+          @keyframes mailBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+          @keyframes mailFly {
+            0% { left: -18px; transform: translateY(0); }
+            25% { transform: translateY(-9px); }
+            50% { transform: translateY(4px); }
+            75% { transform: translateY(-6px); }
+            100% { left: 104%; transform: translateY(0); }
+          }
+        `}</style>
+        <div
+          className="absolute"
+          style={{ top: 16, right: 30, width: 24, height: 24, borderRadius: "50%", background: "#FBD96B", animation: "mailBob 5s ease-in-out infinite" }}
+        />
+        <div
+          className="absolute"
+          style={{ top: 18, height: 12, width: 40, borderRadius: 20, background: "rgba(255,255,255,0.85)", animation: "mailDrift 34s linear infinite" }}
+        />
+        <div
+          className="absolute"
+          style={{ top: 46, height: 10, width: 30, borderRadius: 20, background: "rgba(255,255,255,0.7)", animation: "mailDrift 48s linear infinite", animationDelay: "-12s" }}
+        />
+        <div
+          className="absolute text-sm"
+          style={{ top: 40, color: "#7C4DBD", animation: "mailFly 18s linear infinite" }}
+          aria-hidden="true"
+        >
+          <i className="ti ti-butterfly" />
+        </div>
+
+        <div className="relative px-5 pb-7 pt-6">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold" style={{ color: "#173404" }}>
+              メール共有の設定
+            </h1>
+            <Link
+              href="/tasks"
+              className="text-sm hover:underline"
+              style={{ color: "#3B6D11" }}
+            >
+              ← 進捗管理に戻る
+            </Link>
+          </div>
+          <p className="mt-1 text-sm" style={{ color: "#2f5a2a" }}>
+            進捗サマリを定期的にメール送信するための設定です。送信先・頻度・時刻にしたがって、
+            「自動送信を有効にする」がオンの間、自動で送られます。
+          </p>
           <button
             type="button"
             onClick={onTestSend}
             disabled={testing || !session?.user.email}
             title="自分のメールアドレス宛てに1通送って確認します"
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-3 py-1.5 text-sm font-medium text-[#3B6D11] transition hover:bg-[#EAF3DE] disabled:opacity-50"
           >
             {testing ? "送信中…" : "テスト送信"}
           </button>
         </div>
-        <Link href="/tasks" className="text-sm text-zinc-500 hover:underline">
-          ← 進捗管理に戻る
-        </Link>
+        <div
+          className="absolute inset-x-0 bottom-0 h-2.5"
+          style={{ background: "repeating-linear-gradient(90deg,#9CC65A 0 7px,#8FBF3F 7px 14px)" }}
+        />
       </div>
+
       {testError && <p className="mb-2 text-sm text-red-600">{testError}</p>}
       {testMessage && <p className="mb-2 text-sm text-green-700">{testMessage}</p>}
-
-      <p className="mb-6 text-sm text-zinc-500">
-        進捗サマリを定期的にメール送信するための設定です。保存した送信先・頻度・時刻にしたがって
-        自動で送信されます（「自動送信を有効にする」がオンの間）。
-      </p>
 
       {!loaded ? (
         <p className="text-sm text-zinc-400">読み込み中…</p>
@@ -207,7 +255,7 @@ export default function MailSettingsPage() {
                 type="checkbox"
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
-                className="h-4 w-4"
+                className="h-4 w-4 accent-[#3B6D11]"
               />
               <span className="text-sm font-medium text-zinc-700">
                 自動送信を有効にする
@@ -230,7 +278,7 @@ export default function MailSettingsPage() {
               value={toRecipients}
               onChange={(e) => setToRecipients(e.target.value)}
               placeholder="例：leader@example.com"
-              className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="rounded-lg border border-[#DCE9F5] px-3 py-2 text-zinc-900 outline-none focus:border-[#3B6D11] focus:ring-2 focus:ring-[#EAF3DE]"
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -242,7 +290,7 @@ export default function MailSettingsPage() {
               value={bccRecipients}
               onChange={(e) => setBccRecipients(e.target.value)}
               placeholder="例：member1@example.com, member2@example.com"
-              className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="rounded-lg border border-[#DCE9F5] px-3 py-2 text-zinc-900 outline-none focus:border-[#3B6D11] focus:ring-2 focus:ring-[#EAF3DE]"
             />
             <span className="text-xs text-zinc-400">
               To を空にして Bcc だけにすると、受信者同士にアドレスが見えません。
@@ -255,7 +303,7 @@ export default function MailSettingsPage() {
             <select
               value={frequency}
               onChange={(e) => setFrequency(e.target.value as MailFrequency)}
-              className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="rounded-lg border border-[#DCE9F5] px-3 py-2 text-zinc-900 outline-none focus:border-[#3B6D11] focus:ring-2 focus:ring-[#EAF3DE]"
             >
               <option value="daily">毎日</option>
               <option value="weekly">毎週</option>
@@ -269,7 +317,7 @@ export default function MailSettingsPage() {
               <select
                 value={dayOfWeek}
                 onChange={(e) => setDayOfWeek(Number(e.target.value))}
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="rounded-lg border border-[#DCE9F5] px-3 py-2 text-zinc-900 outline-none focus:border-[#3B6D11] focus:ring-2 focus:ring-[#EAF3DE]"
               >
                 {WEEKDAY_LABELS.map((label, i) => (
                   <option key={i} value={i}>
@@ -287,7 +335,7 @@ export default function MailSettingsPage() {
               type="time"
               value={sendTime}
               onChange={(e) => setSendTime(e.target.value)}
-              className="w-40 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              className="w-40 rounded-lg border border-[#DCE9F5] px-3 py-2 text-zinc-900 outline-none focus:border-[#3B6D11] focus:ring-2 focus:ring-[#EAF3DE]"
             />
           </label>
 
@@ -297,7 +345,7 @@ export default function MailSettingsPage() {
           <button
             type="submit"
             disabled={saving}
-            className="self-start rounded-lg bg-zinc-900 px-5 py-2 font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
+            className="self-start rounded-lg bg-[#3B6D11] px-5 py-2 font-medium text-white transition hover:bg-[#2f5a0e] disabled:opacity-50"
           >
             {saving ? "保存中…" : "保存する"}
           </button>
@@ -308,7 +356,7 @@ export default function MailSettingsPage() {
       {/* Send now: send to the saved recipients immediately (no schedule wait). */}
       {loaded && (
         <div className="mt-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
-          <h2 className="text-lg font-semibold text-zinc-800">今すぐ送信</h2>
+          <h2 className="text-lg font-semibold text-[#173404]">今すぐ送信</h2>
           <p className="mt-1 text-sm text-zinc-500">
             スケジュールを待たず、<strong>保存済みの送信先</strong>
             へ進捗サマリを今すぐ送ります。宛先を変えた場合は先に「保存する」を押してください。
@@ -317,7 +365,7 @@ export default function MailSettingsPage() {
             type="button"
             onClick={onSendNow}
             disabled={sendingNow}
-            className="mt-3 rounded-lg bg-zinc-900 px-5 py-2 font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50"
+            className="mt-3 rounded-lg bg-[#3B6D11] px-5 py-2 font-medium text-white transition hover:bg-[#2f5a0e] disabled:opacity-50"
           >
             {sendingNow ? "送信中…" : "今すぐ送信"}
           </button>
@@ -331,7 +379,7 @@ export default function MailSettingsPage() {
       {/* Send history */}
       {loaded && (
         <div className="mt-8 rounded-2xl bg-white p-6 shadow-md ring-1 ring-black/5">
-          <h2 className="text-lg font-semibold text-zinc-800">送信履歴</h2>
+          <h2 className="text-lg font-semibold text-[#173404]">送信履歴</h2>
           {logs.length === 0 ? (
             <p className="mt-1 text-sm text-zinc-400">
               まだ送信履歴はありません。
@@ -376,6 +424,7 @@ export default function MailSettingsPage() {
           )}
         </div>
       )}
-    </main>
+      </main>
+    </div>
   );
 }

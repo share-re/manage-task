@@ -17,7 +17,16 @@ import { RARE_SPECIES_LIST, type Plant } from "@/app/forest/plants";
 import { fetchWeather, type Weather } from "@/app/forest/weather";
 import World from "./World";
 import ChatPanel from "./ChatPanel";
+import RoomChatPanel, { type RoomMsg } from "./RoomChatPanel";
 import { STATUS_EMOJI, STATUS_LABEL, STATUS_ORDER, type PresenceStatus } from "./officeWorld";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+
+// 内田さん auto-joins the room chat when a message hits one of these words (with a
+// cooldown), or is explicitly summoned with @AI / @内田.
+const AI_KEYWORDS = ["辛い", "しんどい", "疲れた", "無理", "詰まった", "助けて"];
+const AI_MENTION = /@ai|@内田/i;
+const AI_COOLDOWN_MS = 3 * 60 * 1000;
+const CHAT_MAX = 50;
 
 // Remember the last status per device so it survives a reload (not synced across
 // devices; it just restores the previous choice, presence itself is live).
@@ -57,6 +66,13 @@ export default function OfficePage() {
   const [confirmNav, setConfirmNav] = useState(false); // 進捗管理へ遷移する確認
   const [note, setNote] = useState<string>();
   const loadedRef = useRef(false);
+
+  // Office room chat (ephemeral, Realtime broadcast). Everyone in the office
+  // shares one channel; history is kept only in memory (last CHAT_MAX).
+  const [showRoomChat, setShowRoomChat] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState<RoomMsg[]>([]);
+  const chatChannelRef = useRef<RealtimeChannel | null>(null);
+  const lastAiTsRef = useRef(0); // last 内田さん reply time, for the auto-join cooldown
 
   // Presence status shown on the avatar (and used to park teammates by zone).
   const [status, setStatus] = useState<PresenceStatus>(loadStatus);
@@ -142,6 +158,73 @@ export default function OfficePage() {
     return () => { active = false; clearInterval(id); };
   }, [demoWeather]);
 
+  // Subscribe to the office room-chat broadcast channel while in the office, so
+  // messages are received even when the panel is closed (kept to CHAT_MAX).
+  useEffect(() => {
+    const channel = supabase.channel("office-chat", { config: { broadcast: { self: false } } });
+    channel.on("broadcast", { event: "msg" }, ({ payload }) => {
+      const m = payload as RoomMsg;
+      if (!m?.id) return;
+      if (m.ai) lastAiTsRef.current = m.ts;
+      setChatMsgs((cur) => [...cur, m].slice(-CHAT_MAX));
+    });
+    channel.subscribe();
+    chatChannelRef.current = channel;
+    return () => {
+      supabase.removeChannel(channel);
+      chatChannelRef.current = null;
+    };
+  }, []);
+
+  function pushChat(m: RoomMsg) {
+    if (m.ai) lastAiTsRef.current = m.ts;
+    setChatMsgs((cur) => [...cur, m].slice(-CHAT_MAX));
+  }
+  // 内田さん posts into the room chat (broadcast to others + local echo).
+  function postAi(text: string) {
+    const m: RoomMsg = { id: crypto.randomUUID(), name: "内田さん", text, ts: Date.now(), ai: true };
+    chatChannelRef.current?.send({ type: "broadcast", event: "msg", payload: m });
+    pushChat(m);
+  }
+  // Ask the assistant for a reply and post it. Only the sender's client runs this,
+  // so there is exactly one 内田さん reply per triggering message.
+  async function triggerAi(userText: string, mention: boolean) {
+    try {
+      const res = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userText, history: [], userName: playerName }),
+      });
+      const ct = res.headers.get("Content-Type") ?? "";
+      if (!res.ok || !res.body || !ct.startsWith("text/plain")) throw new Error("unavailable");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+      }
+      const reply = acc.trim();
+      if (reply) postAi(reply);
+      else if (mention) postAi("今ちょっと応答できないみたい💦");
+    } catch {
+      // Explicit @mention always gets a reply; keyword auto-join stays silent.
+      if (mention) postAi("今ちょっと応答できないみたい💦");
+    }
+  }
+  function sendChat(text: string) {
+    const t = text.trim();
+    if (!t) return;
+    const m: RoomMsg = { id: crypto.randomUUID(), name: playerName, text: t, ts: Date.now() };
+    chatChannelRef.current?.send({ type: "broadcast", event: "msg", payload: m });
+    pushChat(m);
+    const mention = AI_MENTION.test(t);
+    const keyword = AI_KEYWORDS.some((k) => t.includes(k));
+    const cooldownOk = Date.now() - lastAiTsRef.current > AI_COOLDOWN_MS;
+    if (mention || (keyword && cooldownOk)) triggerAi(t, mention);
+  }
+
   const cancelClose = () => {
     if (closeTimer.current !== null) { clearTimeout(closeTimer.current); closeTimer.current = null; }
   };
@@ -151,10 +234,12 @@ export default function OfficePage() {
   };
   // Panels open/close by clicking the toggles — no need to walk over. Tasks and
   // the 内田さん chat are mutually exclusive so they never overlap on the right.
-  const toggleTasks = () => { setShowChat(false); setShowTasks((v) => !v); };
-  const toggleChat = () => { setShowTasks(false); setShowChat((v) => !v); };
+  const toggleTasks = () => { setShowChat(false); setShowRoomChat(false); setShowTasks((v) => !v); };
+  const toggleChat = () => { setShowTasks(false); setShowRoomChat(false); setShowChat((v) => !v); };
+  const toggleRoomChat = () => { setShowTasks(false); setShowChat(false); setShowRoomChat((v) => !v); };
   // Clicking a station in the world (task board / 内田さん) opens its panel.
   const openStation = (id: "task" | "uchida") => {
+    setShowRoomChat(false);
     if (id === "task") { setShowChat(false); setShowTasks(true); }
     else { setShowTasks(false); setShowChat(true); }
   };
@@ -232,6 +317,12 @@ export default function OfficePage() {
               className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showChat ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
             >
               🤖 内田さん
+            </button>
+            <button
+              onClick={toggleRoomChat}
+              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showRoomChat ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
+            >
+              💬 チャット
             </button>
           </div>
           <div className="mt-2">
@@ -315,6 +406,12 @@ export default function OfficePage() {
       {showChat && (
         <div className="pointer-events-none absolute right-4 top-28 z-10">
           <ChatPanel userName={playerName} onClose={() => setShowChat(false)} />
+        </div>
+      )}
+
+      {showRoomChat && (
+        <div className="pointer-events-none absolute right-4 top-28 z-10">
+          <RoomChatPanel messages={chatMsgs} selfName={playerName} onSend={sendChat} onClose={() => setShowRoomChat(false)} />
         </div>
       )}
 

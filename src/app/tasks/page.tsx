@@ -27,17 +27,22 @@ function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
 }
 
+// Whole days from today until a due date (UTC day granularity). Negative = overdue.
+function dueDiffDays(due: string): number {
+  const [y, m, d] = due.split("-").map(Number);
+  const dueMs = Date.UTC(y, m - 1, d);
+  const now = new Date();
+  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((dueMs - todayMs) / 86_400_000);
+}
+
 // Deadline badge for an incomplete task: overdue / due today / due within 3 days.
 // Returns null when there's nothing to warn about.
 function dueBadge(
   task: Task,
 ): { label: string; className: string } | null {
   if (task.status === "done" || !task.due_date) return null;
-  const [y, m, d] = task.due_date.split("-").map(Number);
-  const dueMs = Date.UTC(y, m - 1, d);
-  const now = new Date();
-  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const diff = Math.round((dueMs - todayMs) / 86_400_000);
+  const diff = dueDiffDays(task.due_date);
   if (diff < 0)
     return { label: `${-diff}日超過`, className: "bg-red-100 text-red-700" };
   if (diff === 0)
@@ -740,8 +745,11 @@ export default function TasksPage() {
     }
   }
 
-  // Only top-level tasks can be a parent — keeps it 2 levels.
-  const parentOptions = tasks.filter((t) => !t.parent_id);
+  // Only top-level tasks that aren't archived (done) can be a parent — keeps
+  // it 2 levels and stops new tasks being filed under a completed parent.
+  const parentOptions = tasks.filter(
+    (t) => !t.parent_id && t.status !== "done",
+  );
   const assigneeOptions = useMemo(
     () =>
       [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[],
@@ -827,6 +835,26 @@ export default function TasksPage() {
     ? `${filterAssignee} の進捗`
     : "チーム全体の進捗";
 
+  // At-a-glance risk across all incomplete tasks (team-wide; intentionally
+  // ignores the assignee filter — everyone should see what's at risk).
+  const riskSummary = useMemo(() => {
+    let overdue = 0;
+    let dueToday = 0;
+    let dueSoon = 0;
+    let unassigned = 0;
+    for (const t of tasks) {
+      if (t.status === "done") continue;
+      if (!t.assignee) unassigned++;
+      if (t.due_date) {
+        const diff = dueDiffDays(t.due_date);
+        if (diff < 0) overdue++;
+        else if (diff === 0) dueToday++;
+        else if (diff <= 3) dueSoon++;
+      }
+    }
+    return { overdue, dueToday, dueSoon, unassigned };
+  }, [tasks]);
+
   const renderRow = (
     task: Task,
     opts: { isChild?: boolean; childCount?: number } = {},
@@ -907,6 +935,30 @@ export default function TasksPage() {
         percent={progress.percent}
         label={progressLabel}
       />
+
+      {/* Risk summary — at-risk tasks at a glance (team-wide, incomplete only) */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {(
+          [
+            ["期限超過", riskSummary.overdue, "text-red-700"],
+            ["本日締切", riskSummary.dueToday, "text-red-700"],
+            ["期限間近", riskSummary.dueSoon, "text-amber-700"],
+            ["担当なし", riskSummary.unassigned, "text-zinc-600"],
+          ] as const
+        ).map(([label, n, cls]) => (
+          <div
+            key={label}
+            className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-black/5"
+          >
+            <div
+              className={`text-xl font-semibold ${n > 0 ? cls : "text-zinc-300"}`}
+            >
+              {n}
+            </div>
+            <div className="text-[11px] text-zinc-500">{label}</div>
+          </div>
+        ))}
+      </div>
 
       {/* Sticky header: tabs + toolbar stay visible while the list scrolls. */}
       <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-zinc-200 bg-zinc-50 px-4 pt-1">

@@ -29,11 +29,11 @@ export type Task = {
 // display order, and the badge color can never drift apart across files.
 export const STATUS_META: Record<
   TaskStatus,
-  { label: string; badgeClass: string }
+  { label: string; badgeClass: string; barColor: string }
 > = {
-  todo: { label: "未着手", badgeClass: "bg-zinc-100 text-zinc-600" },
-  in_progress: { label: "進行中", badgeClass: "bg-blue-100 text-blue-700" },
-  done: { label: "完了", badgeClass: "bg-green-100 text-green-700" },
+  todo: { label: "未着手", badgeClass: "bg-zinc-100 text-zinc-600", barColor: "#B4B2A9" },
+  in_progress: { label: "進行中", badgeClass: "bg-blue-100 text-blue-700", barColor: "#378ADD" },
+  done: { label: "完了", badgeClass: "bg-green-200 text-green-800", barColor: "#3B6D11" },
 };
 
 export const STATUS_ORDER: TaskStatus[] = [...TASK_STATUSES];
@@ -155,6 +155,35 @@ export async function updateTaskStatus(
     })
     .eq("id", id);
   if (error) throw error;
+}
+
+export type TaskEdit = {
+  title: string;
+  assignee?: string;
+  dueDate?: string;
+  status: TaskStatus;
+};
+
+/**
+ * Update a task's editable fields at once (title / assignee / due date /
+ * status) and return the refreshed row. completed_at is kept in sync with the
+ * status so a task moved out of "done" no longer counts as completed.
+ */
+export async function updateTask(id: string, edit: TaskEdit): Promise<Task> {
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      title: edit.title,
+      assignee: edit.assignee?.trim() || null,
+      due_date: edit.dueDate || null,
+      status: edit.status,
+      completed_at: edit.status === "done" ? new Date().toISOString() : null,
+    })
+    .eq("id", id)
+    .select(TASK_COLUMNS)
+    .single();
+  if (error) throw error;
+  return normalizeTask(data);
 }
 
 export type TaskNode = { task: Task; children: Task[] };

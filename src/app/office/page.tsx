@@ -18,6 +18,7 @@ import { fetchWeather, type Weather } from "@/app/forest/weather";
 import World from "./World";
 import ChatPanel from "./ChatPanel";
 import RoomChatPanel, { type RoomMsg } from "./RoomChatPanel";
+import { STATUS_EMOJI, STATUS_LABEL, STATUS_ORDER, type PresenceStatus } from "./officeWorld";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 // 内田さん auto-joins the room chat when a message hits one of these words (with a
@@ -26,6 +27,15 @@ const AI_KEYWORDS = ["辛い", "しんどい", "疲れた", "無理", "詰まっ
 const AI_MENTION = /@ai|@内田/i;
 const AI_COOLDOWN_MS = 3 * 60 * 1000;
 const CHAT_MAX = 50;
+
+// Remember the last status per device so it survives a reload (not synced across
+// devices; it just restores the previous choice, presence itself is live).
+const STATUS_KEY = "office-status";
+function loadStatus(): PresenceStatus {
+  if (typeof window === "undefined") return "working";
+  const s = window.localStorage.getItem(STATUS_KEY);
+  return s === "working" || s === "busy" || s === "away" || s === "break" ? s : "working";
+}
 
 // Same saturating curve as the /forest view: completing tasks always adds green
 // and adding new (incomplete) tasks never removes any.
@@ -63,6 +73,18 @@ export default function OfficePage() {
   const [chatMsgs, setChatMsgs] = useState<RoomMsg[]>([]);
   const chatChannelRef = useRef<RealtimeChannel | null>(null);
   const lastAiTsRef = useRef(0); // last 内田さん reply time, for the auto-join cooldown
+
+  // Presence status shown on the avatar (and used to park teammates by zone).
+  const [status, setStatus] = useState<PresenceStatus>(loadStatus);
+  useEffect(() => {
+    try { window.localStorage.setItem(STATUS_KEY, status); } catch {}
+  }, [status]);
+
+  // Editing the display name (user_metadata.name) from the office profile card.
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameError, setNameError] = useState<string>();
+  const [savingName, setSavingName] = useState(false);
 
   // Real weather (reused from /forest); "?weather=clear|clouds|rain|snow" forces one.
   const [weather, setWeather] = useState<Weather>("clear");
@@ -222,6 +244,26 @@ export default function OfficePage() {
     else { setShowTasks(false); setShowChat(true); }
   };
 
+  function startEditName() {
+    setNameDraft(playerName);
+    setNameError(undefined);
+    setEditingName(true);
+  }
+  // Save the display name to user_metadata; AuthProvider's USER_UPDATED event
+  // then refreshes the session so the new name flows everywhere (incl. presence).
+  async function saveName() {
+    const next = nameDraft.trim();
+    if (!next) { setNameError("名前を入力してください。"); return; }
+    if (next.length > 20) { setNameError("20文字以内で入力してください。"); return; }
+    if (next === playerName) { setEditingName(false); return; }
+    setSavingName(true);
+    setNameError(undefined);
+    const { error } = await supabase.auth.updateUser({ data: { name: next } });
+    setSavingName(false);
+    if (error) { setNameError("変更に失敗しました。時間をおいて再度お試しください。"); return; }
+    setEditingName(false);
+  }
+
   function handlePick(species: string | null, x: number, y: number) {
     if (species) {
       cancelClose();
@@ -246,6 +288,7 @@ export default function OfficePage() {
         playerName={playerName}
         userId={userId}
         playerColor={playerColor}
+        status={status}
         weather={effectiveWeather}
         onPickPlant={handlePick}
         onStationClick={openStation}
@@ -281,6 +324,62 @@ export default function OfficePage() {
             >
               💬 チャット
             </button>
+          </div>
+          <div className="mt-2">
+            <p className="text-[10px] font-semibold text-[#a08a76]">あなた</p>
+            {editingName ? (
+              <div className="mt-1 flex items-center gap-1">
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                  maxLength={20}
+                  className="min-w-0 flex-1 rounded-lg border border-[rgba(120,90,60,0.25)] bg-white px-2 py-1 text-xs text-[#4a3b2f] outline-none focus:border-[#2f9e77]"
+                />
+                <button
+                  onClick={saveName}
+                  disabled={savingName}
+                  className="rounded-lg bg-[#2f9e77] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#268768] disabled:opacity-50"
+                >
+                  {savingName ? "…" : "保存"}
+                </button>
+                <button
+                  onClick={() => setEditingName(false)}
+                  className="rounded-lg px-1.5 py-1 text-[11px] text-[#a08a76] hover:bg-black/5"
+                >
+                  ×
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 flex items-center gap-1">
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#4a3b2f]">{playerName}</span>
+                <button
+                  onClick={startEditName}
+                  title="表示名を変更"
+                  className="rounded-lg px-1.5 py-1 text-[11px] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.15)]"
+                >
+                  ✏️ 変更
+                </button>
+              </div>
+            )}
+            {nameError && <p className="mt-1 text-[10px] text-amber-600">{nameError}</p>}
+          </div>
+          <div className="mt-2">
+            <p className="text-[10px] font-semibold text-[#a08a76]">ステータス</p>
+            <div className="mt-1 flex gap-1">
+              {STATUS_ORDER.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  title={STATUS_LABEL[s]}
+                  className={`flex flex-1 items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[11px] font-semibold ${status === s ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#4a3b2f] hover:bg-[rgba(47,158,119,0.22)]"}`}
+                >
+                  <span>{STATUS_EMOJI[s]}</span>
+                  <span>{STATUS_LABEL[s]}</span>
+                </button>
+              ))}
+            </div>
           </div>
           {note && <p className="mt-2 text-[11px] text-amber-600">{note}</p>}
         </div>

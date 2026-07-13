@@ -42,16 +42,22 @@ export default function MailSettingsPage() {
 
   async function onTestSend() {
     const target = session?.user.email;
-    if (!target) return;
-    setTesting(true);
+    const token = session?.access_token;
     setTestMessage(undefined);
     setTestError(undefined);
+    if (!target || !token) {
+      setTestError(
+        "ログイン状態を確認できませんでした。ページを再読み込みしてからお試しください。",
+      );
+      return;
+    }
+    setTesting(true);
     try {
       const res = await fetch("/api/send-summary", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token ?? ""}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ testRecipient: target }),
       });
@@ -67,6 +73,15 @@ export default function MailSettingsPage() {
   }
 
   async function onSendNow() {
+    setNowMessage(undefined);
+    setNowError(undefined);
+    const token = session?.access_token;
+    if (!token) {
+      setNowError(
+        "ログイン状態を確認できませんでした。ページを再読み込みしてからお試しください。",
+      );
+      return;
+    }
     if (
       !window.confirm(
         "保存済みの送信先へ、進捗サマリを今すぐ送信します。よろしいですか？",
@@ -74,14 +89,12 @@ export default function MailSettingsPage() {
     )
       return;
     setSendingNow(true);
-    setNowMessage(undefined);
-    setNowError(undefined);
     try {
       const res = await fetch("/api/send-summary", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token ?? ""}`,
+          Authorization: `Bearer ${token}`,
         },
         // No testRecipient / no scheduled -> send to the saved recipients now.
         body: JSON.stringify({}),

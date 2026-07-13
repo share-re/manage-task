@@ -5,6 +5,14 @@ import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "@/components/AuthProvider";
+import {
+  createConversation,
+  addMessage,
+  touchConversation,
+  listConversations,
+  getMessages,
+  type Conversation,
+} from "@/lib/conversations";
 
 // 検索の裏取りに使った参照元（出典）1件分。
 type Source = { title: string; uri: string };
@@ -45,6 +53,10 @@ export default function AssistantPage() {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null); // コピー済みの吹き出し
   // 賢さモード。ON のとき、次からの送信を上位モデル(Flash)で行う（チャット欄外のトグルで切替）。
   const [smartMode, setSmartMode] = useState(false);
+  // 保存中の会話ID。最初の送信で会話を作り、以降はこの会話に発言を足していく。
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]); // 履歴一覧
+  const [showHistory, setShowHistory] = useState(false); // 履歴パネルの開閉
   const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
   const textareaRef = useRef<HTMLTextAreaElement>(null); // 入力欄。高さの自動調整に使う
 
@@ -70,6 +82,12 @@ export default function AssistantPage() {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT) + "px";
   }, [input]);
+
+  // ログインできたら、保存済みの会話一覧を読み込む（履歴パネル用）。
+  useEffect(() => {
+    if (session) refreshConversations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   // 返答をクリップボードにコピー（HTTPS / localhost でのみ動く）。
   async function copy(text: string, i: number) {
@@ -263,6 +281,28 @@ export default function AssistantPage() {
         }
       }
 
+      // --- 会話をDBに保存する（通常送信のみ・ベストエフォート）---
+      // 保存に失敗しても、チャット体験は止めない（黙って続行し、ログだけ残す）。
+      if (!isRetry && started && !controller.signal.aborted) {
+        const replyText = splitAcc(acc).textPart;
+        try {
+          let cid = conversationId;
+          const isNew = !cid;
+          if (!cid) {
+            // 最初の送信：会話を新規作成し、最初のユーザー発言をタイトルにする。
+            const conv = await createConversation(text);
+            cid = conv.id;
+            setConversationId(cid);
+          }
+          await addMessage(cid, "user", text);
+          await addMessage(cid, "model", replyText);
+          await touchConversation(cid);
+          if (isNew) await refreshConversations(); // 新しい会話を一覧にも反映
+        } catch (e) {
+          console.error("会話の保存に失敗:", e);
+        }
+      }
+
       // 停止で中断したときは「応答なし」を出さない。
       if (!started && !controller.signal.aborted) {
         setMessages((prev) => [
@@ -285,6 +325,38 @@ export default function AssistantPage() {
   // 生成を途中で止める（停止ボタン）。受信済みの文章はそのまま残す。
   function stop() {
     abortRef.current?.abort();
+  }
+
+  // 保存済みの会話一覧を取り直す（最近使った順）。
+  async function refreshConversations() {
+    try {
+      setConversations(await listConversations());
+    } catch (e) {
+      console.error("会話一覧の取得に失敗:", e);
+    }
+  }
+
+  // 過去の会話を開いて、続きから表示する。
+  async function openConversation(id: string) {
+    try {
+      const rows = await getMessages(id);
+      setMessages(rows.map((r) => ({ role: r.role, text: r.text })));
+      setConversationId(id);
+      setShowHistory(false);
+      setError(undefined);
+    } catch (e) {
+      console.error("会話の読み込みに失敗:", e);
+      setError("会話の読み込みに失敗しました。");
+    }
+  }
+
+  // 新しい会話を始める（今の表示をまっさらに。保存済みの会話は消えない）。
+  function newConversation() {
+    setMessages([]);
+    setConversationId(null);
+    setInput("");
+    setShowHistory(false);
+    setError(undefined);
   }
 
   // 「考え直して」：直前の質問を、いまの賢さモードのまま送り直す。
@@ -533,12 +605,58 @@ export default function AssistantPage() {
             </p>
           </div>
         </div>
-        <Link
-          href="/office"
-          className="whitespace-nowrap rounded-lg bg-white/70 px-3 py-1 text-sm text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
-        >
-          オフィスへ
-        </Link>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* 新しい会話を始める */}
+          <button
+            type="button"
+            onClick={newConversation}
+            className="whitespace-nowrap rounded-lg bg-white/70 px-2.5 py-1 text-xs text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
+          >
+            ＋ 新規
+          </button>
+
+          {/* 履歴（過去の会話一覧）。ボタンでパネルを開閉する。 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              aria-expanded={showHistory}
+              className="whitespace-nowrap rounded-lg bg-white/70 px-2.5 py-1 text-xs text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
+            >
+              履歴
+            </button>
+            {showHistory && (
+              <div className="absolute right-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg bg-white p-1 shadow-lg ring-1 ring-black/10">
+                {conversations.length === 0 ? (
+                  <p className="p-2 text-xs text-zinc-500">
+                    まだ保存された会話はありません。
+                  </p>
+                ) : (
+                  conversations.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => openConversation(c.id)}
+                      className="flex w-full items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-700 transition hover:bg-emerald-50"
+                    >
+                      <span className="truncate">{c.title || "（無題）"}</span>
+                      <span className="shrink-0 text-[10px] text-zinc-400">
+                        {new Date(c.updated_at).toLocaleDateString("ja-JP")}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <Link
+            href="/office"
+            className="whitespace-nowrap rounded-lg bg-white/70 px-2.5 py-1 text-xs text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
+          >
+            オフィスへ
+          </Link>
+        </div>
       </header>
 
       {/* 会話エリア（ここだけスクロール） */}

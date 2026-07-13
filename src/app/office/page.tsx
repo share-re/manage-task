@@ -17,6 +17,16 @@ import { RARE_SPECIES_LIST, type Plant } from "@/app/forest/plants";
 import { fetchWeather, type Weather } from "@/app/forest/weather";
 import World from "./World";
 import ChatPanel from "./ChatPanel";
+import { STATUS_EMOJI, STATUS_LABEL, STATUS_ORDER, type PresenceStatus } from "./officeWorld";
+
+// Remember the last status per device so it survives a reload (not synced across
+// devices; it just restores the previous choice, presence itself is live).
+const STATUS_KEY = "office-status";
+function loadStatus(): PresenceStatus {
+  if (typeof window === "undefined") return "working";
+  const s = window.localStorage.getItem(STATUS_KEY);
+  return s === "working" || s === "busy" || s === "away" || s === "break" ? s : "working";
+}
 
 // Same saturating curve as the /forest view: completing tasks always adds green
 // and adding new (incomplete) tasks never removes any.
@@ -47,6 +57,12 @@ export default function OfficePage() {
   const [confirmNav, setConfirmNav] = useState(false); // 進捗管理へ遷移する確認
   const [note, setNote] = useState<string>();
   const loadedRef = useRef(false);
+
+  // Presence status shown on the avatar (and used to park teammates by zone).
+  const [status, setStatus] = useState<PresenceStatus>(loadStatus);
+  useEffect(() => {
+    try { window.localStorage.setItem(STATUS_KEY, status); } catch {}
+  }, [status]);
 
   // Real weather (reused from /forest); "?weather=clear|clouds|rain|snow" forces one.
   const [weather, setWeather] = useState<Weather>("clear");
@@ -161,6 +177,7 @@ export default function OfficePage() {
         playerName={playerName}
         userId={userId}
         playerColor={playerColor}
+        status={status}
         weather={effectiveWeather}
         onPickPlant={handlePick}
         onStationClick={openStation}
@@ -190,6 +207,22 @@ export default function OfficePage() {
             >
               🤖 内田さん
             </button>
+          </div>
+          <div className="mt-2">
+            <p className="text-[10px] font-semibold text-[#a08a76]">ステータス</p>
+            <div className="mt-1 flex gap-1">
+              {STATUS_ORDER.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  title={STATUS_LABEL[s]}
+                  className={`flex flex-1 items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[11px] font-semibold ${status === s ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#4a3b2f] hover:bg-[rgba(47,158,119,0.22)]"}`}
+                >
+                  <span>{STATUS_EMOJI[s]}</span>
+                  <span>{STATUS_LABEL[s]}</span>
+                </button>
+              ))}
+            </div>
           </div>
           {note && <p className="mt-2 text-[11px] text-amber-600">{note}</p>}
         </div>

@@ -6,12 +6,14 @@ import {
   drawWorld,
   moveActor,
   seatForUser,
+  seatForStatus,
   treeAt,
   viewTransform,
   STATIONS,
   T,
   type Actor,
   type Facing,
+  type PresenceStatus,
   type StationId,
   type WorldState,
 } from "./officeWorld";
@@ -22,6 +24,7 @@ type Props = {
   playerName: string;
   userId: string;
   playerColor: string;
+  status: PresenceStatus;
   weather: Weather;
   onPickPlant?: (species: string | null, x: number, y: number) => void;
   // Fired when the player walks into / out of a station's radius, so the page
@@ -43,6 +46,7 @@ type PresenceMeta = {
   name: string;
   shirt: string;
   hair: string;
+  status: PresenceStatus;
 };
 
 type Remote = Actor & { tx: number; tz: number }; // tx/tz = interpolation target
@@ -53,25 +57,27 @@ const AI: Actor = {
   face: "down", ph: 5, ai: true, glasses: true,
 };
 
-export default function World({ progress, playerName, userId, playerColor, weather, onPickPlant, onStationChange, onStationClick, onStationDblClick }: Props) {
+export default function World({ progress, playerName, userId, playerColor, status, weather, onPickPlant, onStationChange, onStationClick, onStationDblClick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
   const moveTargetRef = useRef<{ x: number; z: number } | null>(null); // click-to-move goal
   // Arrive at a seat in one of the zones (see SEATS), not one shared spawn spot.
   const seat = seatForUser(userId);
   const selfRef = useRef<Actor>({
-    x: seat.x, z: seat.z, name: playerName, shirt: playerColor, hair: HAIR, face: seat.face, ph: 0, self: true,
+    x: seat.x, z: seat.z, name: playerName, shirt: playerColor, hair: HAIR, face: seat.face, ph: 0, self: true, status,
   });
   const remotesRef = useRef<Map<string, Remote>>(new Map());
   const worldRef = useRef({ dispP: 0, targetP: 0 });
   const weatherRef = useRef<Weather>(weather);
   const nearRef = useRef<Record<StationId, boolean>>({ task: false, uchida: false });
   const onStationRef = useRef(onStationChange);
+  const statusDirtyRef = useRef(false); // set when the user changes status → re-track now
 
   useEffect(() => { worldRef.current.targetP = progress; }, [progress]);
   useEffect(() => { weatherRef.current = weather; }, [weather]);
   useEffect(() => { onStationRef.current = onStationChange; });
   useEffect(() => { selfRef.current.name = playerName; selfRef.current.shirt = playerColor; }, [playerName, playerColor]);
+  useEffect(() => { selfRef.current.status = status; statusDirtyRef.current = true; }, [status]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -118,14 +124,18 @@ export default function World({ progress, playerName, userId, playerColor, weath
         const m = st[key][0];
         if (!m) continue;
         seen.add(key);
+        // Park each teammate at a seat in the zone their status implies, rather
+        // than their raw broadcast position, so the room clusters by activity.
+        const stat = m.status ?? "working";
+        const spot = seatForStatus(key, stat);
         const cur = remotesRef.current.get(key);
         if (!cur) {
           remotesRef.current.set(key, {
-            x: m.x, z: m.z, tx: m.x, tz: m.z, name: m.name, shirt: m.shirt,
-            hair: m.hair, face: m.face, moving: m.moving, ph: (key.charCodeAt(0) % 7) + 1,
+            x: spot.x, z: spot.z, tx: spot.x, tz: spot.z, name: m.name, shirt: m.shirt,
+            hair: m.hair, face: spot.face, moving: false, status: stat, ph: (key.charCodeAt(0) % 7) + 1,
           });
         } else {
-          cur.tx = m.x; cur.tz = m.z; cur.face = m.face; cur.moving = m.moving;
+          cur.tx = spot.x; cur.tz = spot.z; cur.status = stat;
           cur.name = m.name; cur.shirt = m.shirt; cur.hair = m.hair;
         }
       }
@@ -138,7 +148,7 @@ export default function World({ progress, playerName, userId, playerColor, weath
         const me = selfRef.current;
         channel.track({
           x: me.x, z: me.z, face: me.face, moving: false,
-          name: me.name, shirt: me.shirt, hair: me.hair,
+          name: me.name, shirt: me.shirt, hair: me.hair, status: me.status ?? "working",
         } satisfies PresenceMeta);
       }
     });
@@ -183,11 +193,15 @@ export default function World({ progress, playerName, userId, playerColor, weath
             onStationRef.current?.(s.id, inside);
           }
         }
-        // Interpolate remote players toward their latest known position.
+        // Interpolate remote players toward their status seat; when their status
+        // changes zones they visibly "walk" over to the new spot.
         for (const r of remotesRef.current.values()) {
+          const rdx = r.tx - r.x, rdz = r.tz - r.z;
+          r.moving = Math.hypot(rdx, rdz) > 0.06;
+          if (r.moving) r.face = Math.abs(rdx) > Math.abs(rdz) ? (rdx > 0 ? "right" : "left") : rdz > 0 ? "down" : "up";
           const k = Math.min(1, dt * 10);
-          r.x += (r.tx - r.x) * k;
-          r.z += (r.tz - r.z) * k;
+          r.x += rdx * k;
+          r.z += rdz * k;
         }
         // Low-frequency presence to stay well under Realtime limits (Free allows
         // ~20 presence msgs/sec): update when the player settles (stops moving)
@@ -196,11 +210,12 @@ export default function World({ progress, playerName, userId, playerColor, weath
         sinceTrack += dt;
         const justStopped = wasMoving && !me.moving;
         wasMoving = me.moving;
-        if (justStopped || sinceTrack > 4) {
+        if (justStopped || sinceTrack > 4 || statusDirtyRef.current) {
           sinceTrack = 0;
+          statusDirtyRef.current = false;
           channel.track({
             x: me.x, z: me.z, face: me.face, moving: false,
-            name: me.name, shirt: me.shirt, hair: me.hair,
+            name: me.name, shirt: me.shirt, hair: me.hair, status: me.status ?? "working",
           } satisfies PresenceMeta);
         }
 

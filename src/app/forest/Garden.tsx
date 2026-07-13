@@ -10,6 +10,9 @@ type Props = {
   growth: number; // greenery level from the completed count, 0..1
   hour: number; // local time of day (0-24, fractional) for the day/night sky
   weather: Weather; // current weather condition
+  // When provided, draw exactly these plants (album month page) instead of
+  // building the garden from `done`. `done` still drives ambient touches.
+  plants?: Plant[];
   onPickPlant?: (plant: Plant | null, clientX: number, clientY: number) => void;
 };
 
@@ -20,21 +23,23 @@ export default function Garden({
   growth,
   hour,
   weather,
+  plants,
   onPickPlant,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ done, growth, hour, weather });
+  const stateRef = useRef({ done, growth, hour, weather, plants });
 
   // buildGarden is deterministic in `done`, so cache its result and rebuild
   // only when `done` changes instead of allocating the list every frame /
-  // every pointer move.
+  // every pointer move. An explicit `plants` prop bypasses this (album mode).
   const plantsRef = useRef<{ done: number; plants: Plant[] }>({
     done: -1,
     plants: [],
   });
-  function gardenFor(done: number): Plant[] {
-    if (plantsRef.current.done !== done) {
-      plantsRef.current = { done, plants: buildGarden(done) };
+  function gardenFor(s: { done: number; plants?: Plant[] }): Plant[] {
+    if (s.plants) return s.plants;
+    if (plantsRef.current.done !== s.done) {
+      plantsRef.current = { done: s.done, plants: buildGarden(s.done) };
     }
     return plantsRef.current.plants;
   }
@@ -45,7 +50,7 @@ export default function Garden({
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     const layouts = layoutPlants(
-      gardenFor(stateRef.current.done),
+      gardenFor(stateRef.current),
       canvas.clientWidth,
       canvas.clientHeight,
     );
@@ -55,8 +60,8 @@ export default function Garden({
 
   // Keep the latest values available to the animation loop without restarting it.
   useEffect(() => {
-    stateRef.current = { done, growth, hour, weather };
-  }, [done, growth, hour, weather]);
+    stateRef.current = { done, growth, hour, weather, plants };
+  }, [done, growth, hour, weather, plants]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -72,8 +77,8 @@ export default function Garden({
       const h = canvas!.clientHeight;
       if (w === 0 || h === 0) return;
       const s = stateRef.current;
-      const plants = gardenFor(s.done);
-      drawGarden(ctx!, w, h, plants, s.growth, s.hour, s.weather, t);
+      const framePlants = gardenFor(s);
+      drawGarden(ctx!, w, h, framePlants, s.growth, s.hour, s.weather, t);
     }
 
     // Size the drawing buffer to the canvas's CSS box (driven by h-full/w-full).

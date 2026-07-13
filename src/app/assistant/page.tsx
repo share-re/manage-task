@@ -11,6 +11,7 @@ import {
   touchConversation,
   listConversations,
   getMessages,
+  deleteConversation,
   type Conversation,
 } from "@/lib/conversations";
 
@@ -57,6 +58,7 @@ export default function AssistantPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]); // 履歴一覧
   const [showHistory, setShowHistory] = useState(false); // 履歴パネルの開閉
+  const [saveEnabled, setSaveEnabled] = useState(true); // この会話を保存するか（プライバシー）
   const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
   const textareaRef = useRef<HTMLTextAreaElement>(null); // 入力欄。高さの自動調整に使う
 
@@ -283,7 +285,7 @@ export default function AssistantPage() {
 
       // --- 会話をDBに保存する（通常送信のみ・ベストエフォート）---
       // 保存に失敗しても、チャット体験は止めない（黙って続行し、ログだけ残す）。
-      if (!isRetry && started && !controller.signal.aborted) {
+      if (saveEnabled && !isRetry && started && !controller.signal.aborted) {
         const replyText = splitAcc(acc).textPart;
         try {
           let cid = conversationId;
@@ -357,6 +359,22 @@ export default function AssistantPage() {
     setInput("");
     setShowHistory(false);
     setError(undefined);
+  }
+
+  // 会話を削除する（確認あり）。開いている会話を消したら、表示もクリアする。
+  async function removeConversation(id: string) {
+    if (!window.confirm("この会話を削除しますか？（元に戻せません）")) return;
+    try {
+      await deleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (conversationId === id) {
+        setMessages([]);
+        setConversationId(null);
+      }
+    } catch (e) {
+      console.error("会話の削除に失敗:", e);
+      setError("会話の削除に失敗しました。");
+    }
   }
 
   // 「考え直して」：直前の質問を、いまの賢さモードのまま送り直す。
@@ -633,17 +651,42 @@ export default function AssistantPage() {
                   </p>
                 ) : (
                   conversations.map((c) => (
-                    <button
+                    <div
                       key={c.id}
-                      type="button"
-                      onClick={() => openConversation(c.id)}
-                      className="flex w-full items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-700 transition hover:bg-emerald-50"
+                      className="flex items-center gap-1 rounded-md pr-1 hover:bg-emerald-50"
                     >
-                      <span className="truncate">{c.title || "（無題）"}</span>
-                      <span className="shrink-0 text-[10px] text-zinc-400">
-                        {new Date(c.updated_at).toLocaleDateString("ja-JP")}
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => openConversation(c.id)}
+                        className="flex min-w-0 flex-1 items-baseline justify-between gap-2 px-2 py-1.5 text-left text-sm text-zinc-700"
+                      >
+                        <span className="truncate">{c.title || "（無題）"}</span>
+                        <span className="shrink-0 text-[10px] text-zinc-400">
+                          {new Date(c.updated_at).toLocaleDateString("ja-JP")}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeConversation(c.id)}
+                        aria-label="この会話を削除"
+                        title="削除"
+                        className="shrink-0 rounded p-1 text-zinc-400 transition hover:bg-red-50 hover:text-red-600"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="14"
+                          height="14"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        </svg>
+                      </button>
+                    </div>
                   ))
                 )}
               </div>
@@ -744,27 +787,47 @@ export default function AssistantPage() {
 
       {/* 賢さモードの切り替え（チャット欄の外）。ONにすると次からの送信を賢いモデル(Flash)で行う。
           先にONにしておけば、ふつうの返答を1回はさまずに、最初から賢く答えてもらえる。 */}
-      <div className="mt-3 flex items-center justify-end gap-2">
-        <span className="text-xs text-emerald-800/70">
-          {smartMode
-            ? "賢くモード：しっかり考える（無料枠を多めに使います）"
-            : "ふつうモード：軽快に答える"}
-        </span>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        {/* 保存のオン/オフ（プライバシー）。OFFにすると、この会話をサーバに保存しない。 */}
         <button
           type="button"
           role="switch"
-          aria-checked={smartMode}
-          onClick={() => setSmartMode((v) => !v)}
-          title="ONにすると、次からの返答を上位モデル(Flash)で考えます（無料枠を多めに使います）"
+          aria-checked={saveEnabled}
+          onClick={() => setSaveEnabled((v) => !v)}
+          title="OFFにすると、この会話をサーバに保存しません"
           className={
             "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ring-1 transition " +
-            (smartMode
-              ? "bg-emerald-600 text-white ring-emerald-600"
-              : "bg-white/70 text-emerald-700 ring-emerald-600/30 hover:bg-white")
+            (saveEnabled
+              ? "bg-white/70 text-emerald-700 ring-emerald-600/30 hover:bg-white"
+              : "bg-zinc-100 text-zinc-500 ring-zinc-300 hover:bg-zinc-200")
           }
         >
-          🧠 賢く {smartMode ? "ON" : "OFF"}
+          {saveEnabled ? "💾 保存する" : "🔒 保存しない"}
         </button>
+
+        {/* 賢さモードの切り替え。ONにすると次からの送信を賢いモデル(Flash)で行う。 */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-emerald-800/70">
+            {smartMode
+              ? "賢くモード：しっかり考える（無料枠を多めに使います）"
+              : "ふつうモード：軽快に答える"}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={smartMode}
+            onClick={() => setSmartMode((v) => !v)}
+            title="ONにすると、次からの返答を上位モデル(Flash)で考えます（無料枠を多めに使います）"
+            className={
+              "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ring-1 transition " +
+              (smartMode
+                ? "bg-emerald-600 text-white ring-emerald-600"
+                : "bg-white/70 text-emerald-700 ring-emerald-600/30 hover:bg-white")
+            }
+          >
+            🧠 賢く {smartMode ? "ON" : "OFF"}
+          </button>
+        </div>
       </div>
 
       {/* 入力欄（Enterで送信 / Shift+Enterで改行） */}

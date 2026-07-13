@@ -28,6 +28,9 @@ function splitAcc(acc: string): { textPart: string; metaRaw: string } {
   return { textPart: acc.slice(0, i), metaRaw: acc.slice(i + SOURCES_SEP.length) };
 }
 
+// 入力欄の最大高さ(px)。約5行分。これを超えたら伸ばさず、入力欄の中でスクロールさせる。
+const MAX_INPUT_HEIGHT = 128;
+
 export default function AssistantPage() {
   const { session } = useAuth();
   // ログイン中の名前。表示名が無ければメールの@より前を名前代わりに使う。
@@ -43,6 +46,7 @@ export default function AssistantPage() {
   // 賢さモード。ON のとき、次からの送信を上位モデル(Flash)で行う（チャット欄外のトグルで切替）。
   const [smartMode, setSmartMode] = useState(false);
   const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
+  const textareaRef = useRef<HTMLTextAreaElement>(null); // 入力欄。高さの自動調整に使う
 
   // 自動スクロール用。ユーザーが上に遡っているときは追従しない。
   const listRef = useRef<HTMLDivElement>(null);
@@ -56,6 +60,16 @@ export default function AssistantPage() {
     const el = listRef.current;
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, loading]);
+
+  // 入力欄の高さを中身に合わせて自動調整（最大 MAX_INPUT_HEIGHT＝約5行まで）。
+  // ①いったん auto に戻して本来の高さ(scrollHeight)を測り、②最大値で頭打ちしてセット。
+  // 送信後に空へ戻したときも縮むよう、input の変化に反応させる。
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT) + "px";
+  }, [input]);
 
   // 返答をクリップボードにコピー（HTTPS / localhost でのみ動く）。
   async function copy(text: string, i: number) {
@@ -644,13 +658,14 @@ export default function AssistantPage() {
         className="mt-2 flex items-end gap-2"
       >
         <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={loading}
           rows={1}
           placeholder="メッセージを入力…（Shift+Enterで送信）"
-          className="max-h-32 flex-1 resize-none rounded-lg border border-emerald-600/20 bg-white/80 px-3 py-2 text-zinc-900 shadow-sm outline-none backdrop-blur focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 disabled:bg-zinc-100/80"
+          className="max-h-32 flex-1 resize-none overflow-y-auto rounded-lg border border-emerald-600/20 bg-white/80 px-3 py-2 text-zinc-900 shadow-sm outline-none backdrop-blur focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 disabled:bg-zinc-100/80"
         />
         {loading ? (
           <button

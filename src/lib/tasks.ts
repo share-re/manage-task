@@ -135,6 +135,20 @@ export function taskProgress(tasks: Task[]): {
   return { done, total, percent };
 }
 
+/**
+ * The "leaf" tasks — those with no children (child tasks plus standalone
+ * tasks). Parents that group children are excluded: a parent is an aggregate,
+ * and its completion is auto-derived from its children (see the parent
+ * auto-archive rule), so counting parents would double-count the same work and
+ * inflate progress. Counting leaves reflects the real, hands-on work done.
+ */
+export function leafTasks(tasks: Task[]): Task[] {
+  const parentIds = new Set(
+    tasks.map((t) => t.parent_id).filter((id): id is string => id !== null),
+  );
+  return tasks.filter((t) => !parentIds.has(t.id));
+}
+
 /** Delete one or more tasks by id. */
 export async function deleteTasks(ids: string[]): Promise<void> {
   if (ids.length === 0) return;

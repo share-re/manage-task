@@ -8,6 +8,7 @@ import {
   createTask,
   createTasks,
   deleteTasks,
+  leafTasks,
   listTasks,
   taskProgress,
   updateTask,
@@ -815,9 +816,12 @@ export default function TasksPage() {
   // Progress tracks the assignee filter: pick a person to see just their
   // progress, or "すべて" for the whole team. (Status filter is intentionally
   // ignored here — filtering to "done" would always read 100%.)
+  // Progress is counted over LEAF tasks (child + standalone tasks), excluding
+  // parents that only group children — see leafTasks() for why.
+  const leaves = useMemo(() => leafTasks(tasks), [tasks]);
   const progressScope = filterAssignee
-    ? tasks.filter((t) => (t.assignee || "") === filterAssignee)
-    : tasks;
+    ? leaves.filter((t) => (t.assignee || "") === filterAssignee)
+    : leaves;
   const progress = taskProgress(progressScope);
   const progressLabel = filterAssignee
     ? `${filterAssignee} の進捗`

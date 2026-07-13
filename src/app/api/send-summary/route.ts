@@ -54,32 +54,18 @@ function isDue(s: EmailSettingsRow): boolean {
   return true;
 }
 
-export async function POST(request: Request) {
+function bearerToken(request: Request): string {
+  return (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+}
+
+// Core send. Shared by the manual POST (test / immediate send) and the
+// scheduler's GET. `scheduled` gates on isDue() and records last_sent_at to
+// prevent duplicate sends; `testRecipient` sends a one-off to a single address.
+async function runSend(opts: {
+  scheduled?: boolean;
+  testRecipient?: string;
+}): Promise<NextResponse> {
   const supabaseAdmin = getSupabaseAdmin();
-
-  // AuthZ: allow either the scheduler's CRON_SECRET or a logged-in user's token.
-  const token = (request.headers.get("authorization") ?? "").replace(
-    /^Bearer\s+/i,
-    "",
-  );
-  const cronSecret = process.env.CRON_SECRET;
-  let authorized = false;
-  if (cronSecret && token === cronSecret) {
-    authorized = true; // called by the scheduler
-  } else if (token) {
-    const { data: userData } = await supabaseAdmin.auth.getUser(token);
-    authorized = !!userData.user; // called by a logged-in user (test button)
-  }
-  if (!authorized) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-
-  let body: { testRecipient?: string; scheduled?: boolean } = {};
-  try {
-    body = await request.json();
-  } catch {
-    // no body is fine
-  }
 
   // Load the single team-wide settings row.
   const { data: settings } = await supabaseAdmin
@@ -92,7 +78,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   // Scheduled call: only proceed when it is actually due.
-  if (body.scheduled) {
+  if (opts.scheduled) {
     if (!settings) return NextResponse.json({ skipped: "no settings" });
     if (!isDue(settings as EmailSettingsRow)) {
       return NextResponse.json({ skipped: "not due" });
@@ -109,8 +95,8 @@ export async function POST(request: Request) {
 
   let to: string[];
   let bcc: string[];
-  if (body.testRecipient) {
-    to = parseList(body.testRecipient);
+  if (opts.testRecipient) {
+    to = parseList(opts.testRecipient);
     bcc = [];
   } else {
     to = parseList(settings?.to_recipients);
@@ -180,7 +166,7 @@ export async function POST(request: Request) {
   await logSend("sent");
 
   // Record last_sent_at for scheduled sends to prevent duplicates.
-  if (body.scheduled && settings?.id) {
+  if (opts.scheduled && settings?.id) {
     await supabaseAdmin
       .from("email_settings")
       .update({ last_sent_at: new Date().toISOString() })
@@ -188,4 +174,44 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ ok: true, sentTo: recipients });
+}
+
+// Manual send: the "test" / "send now" buttons in the settings UI. Authorized by
+// the scheduler's CRON_SECRET or a logged-in user's bearer token.
+export async function POST(request: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
+
+  const token = bearerToken(request);
+  const cronSecret = process.env.CRON_SECRET;
+  let authorized = false;
+  if (cronSecret && token === cronSecret) {
+    authorized = true; // called by the scheduler
+  } else if (token) {
+    const { data: userData } = await supabaseAdmin.auth.getUser(token);
+    authorized = !!userData.user; // called by a logged-in user (test button)
+  }
+  if (!authorized) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  let body: { testRecipient?: string; scheduled?: boolean } = {};
+  try {
+    body = await request.json();
+  } catch {
+    // no body is fine
+  }
+
+  return runSend(body);
+}
+
+// Scheduled send: Vercel Cron hits this path with a GET request and an
+// `Authorization: Bearer <CRON_SECRET>` header (added automatically when the
+// CRON_SECRET env var is set). Always runs as a scheduled send.
+export async function GET(request: Request) {
+  const cronSecret = process.env.CRON_SECRET;
+  const token = bearerToken(request);
+  if (!cronSecret || token !== cronSecret) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  return runSend({ scheduled: true });
 }

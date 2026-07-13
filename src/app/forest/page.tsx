@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { listTasks, taskProgress, updateTaskStatus, type Task } from "@/lib/tasks";
 import Garden from "./Garden";
@@ -9,7 +9,31 @@ import Celebration from "./Celebration";
 import PlantTooltip from "./PlantTooltip";
 import TaskPanel from "./TaskPanel";
 import { fetchWeather, type Weather } from "./weather";
-import type { Plant } from "./plants";
+import type { Plant, Season } from "./plants";
+import { SEASON_JA } from "./plants";
+import {
+  backfillAlbumFromTasks,
+  entriesToPlants,
+  groupByMonth,
+  listAlbumEntries,
+  stampExpiredAsMoved,
+  type AlbumMonth,
+} from "./album";
+
+// Seasonal mood wash laid over the canvas for an album month page. Kept as a
+// CSS overlay so the canvas renderer (draw.ts) stays unchanged.
+const SEASON_OVERLAY: Record<Season, string> = {
+  spring: "linear-gradient(180deg, rgba(244,184,208,0.30), rgba(255,255,255,0) 46%)",
+  summer: "linear-gradient(180deg, rgba(120,200,140,0.26), rgba(255,255,255,0) 46%)",
+  autumn: "linear-gradient(180deg, rgba(216,140,80,0.32), rgba(255,255,255,0) 48%)",
+  winter: "linear-gradient(180deg, rgba(180,205,230,0.34), rgba(255,255,255,0) 52%)",
+};
+const SEASON_EMOJI: Record<Season, string> = {
+  spring: "🌸",
+  summer: "🌻",
+  autumn: "🍁",
+  winter: "❄️",
+};
 
 // Stage label based on the NUMBER of completed tasks (not a ratio), so the
 // forest never regresses when new tasks are added.
@@ -44,6 +68,13 @@ export default function ForestPage() {
   const [hour, setHour] = useState(currentHour);
   const [celebrate, setCelebrate] = useState<number | null>(null);
   const prevDoneRef = useRef<number | null>(null);
+  // Seasonal album (issue #23): months of completed plants read from
+  // garden_album. `view` toggles between the album and the classic live garden;
+  // the album is the default when there is anything to show.
+  const [months, setMonths] = useState<AlbumMonth[]>([]);
+  const [monthIdx, setMonthIdx] = useState(0); // 0 = newest month
+  const [view, setView] = useState<"album" | "live">("album");
+  const [albumNote, setAlbumNote] = useState<string>();
   // Preview helper: "?demo=N" overrides the shown completed count without
   // touching the shared data, for checking how the garden looks at any size.
   const [demoDone] = useState<number | null>(() => {
@@ -134,6 +165,37 @@ export default function ForestPage() {
     };
   }, []);
 
+  // Load the seasonal album from garden_album. Best-effort backfill first so
+  // already-completed tasks populate the album even before the office-side
+  // pipeline writes rows; then read + group by month. Kept separate from the
+  // live-garden load so a missing/empty garden_album never breaks the garden.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const list = await listTasks();
+        await backfillAlbumFromTasks(list).catch(() => {});
+        await stampExpiredAsMoved().catch(() => {});
+        const entries = await listAlbumEntries();
+        if (!active) return;
+        const grouped = groupByMonth(entries);
+        setMonths(grouped);
+        setMonthIdx(0);
+        setAlbumNote(undefined);
+      } catch (err) {
+        if (!active) return;
+        console.error(err);
+        // garden_album may not exist yet (run docs/design/forest-album.sql).
+        setAlbumNote(
+          "アルバムを読み込めませんでした（garden_album 未作成の可能性）。庭表示に切り替えられます。",
+        );
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Sync the garden weather with the real weather (falls back to Tokyo when
   // geolocation is unavailable or denied). Skipped when "?weather=" forces one.
   useEffect(() => {
@@ -218,15 +280,40 @@ export default function ForestPage() {
   const growth = growthFromDone(effectiveDone);
   const growthPercent = Math.round(growth * 100);
 
+  // Album view state. currentMonth is null when the album is empty or the user
+  // switched to the live garden; albumPlants is memoized on the chosen month so
+  // the canvas layout cache stays warm across renders.
+  const showAlbum = view === "album" && months.length > 0;
+  const currentMonth = showAlbum
+    ? months[Math.min(monthIdx, months.length - 1)]
+    : null;
+  const albumPlants = useMemo(
+    () => (currentMonth ? entriesToPlants(currentMonth.entries) : undefined),
+    [currentMonth],
+  );
+  const gardenWeather: Weather = currentMonth
+    ? currentMonth.season === "winter"
+      ? "snow"
+      : "clear"
+    : effectiveWeather;
+
   return (
     <main className="relative min-h-[100svh] flex-1 overflow-hidden bg-sky-100">
       <Garden
         done={effectiveDone}
-        growth={growth}
+        growth={showAlbum ? 1 : growth}
         hour={hour}
-        weather={effectiveWeather}
+        weather={gardenWeather}
+        plants={albumPlants}
         onPickPlant={handlePick}
       />
+
+      {showAlbum && currentMonth && (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: SEASON_OVERLAY[currentMonth.season] }}
+        />
+      )}
 
       {picked && (
         <PlantTooltip
@@ -260,6 +347,14 @@ export default function ForestPage() {
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-lg font-bold text-emerald-800">🌱 植林</h1>
             <div className="flex items-center gap-2">
+              {months.length > 0 && (
+                <button
+                  onClick={() => setView((v) => (v === "album" ? "live" : "album"))}
+                  className="rounded-lg bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-700 hover:bg-amber-200"
+                >
+                  {view === "album" ? "🌳 庭を見る" : "📖 アルバム"}
+                </button>
+              )}
               <button
                 onClick={() => setShowTasks((v) => !v)}
                 className={`rounded-lg px-3 py-1 text-sm font-semibold ${
@@ -300,27 +395,62 @@ export default function ForestPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-emerald-100">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-lime-400 to-emerald-500 transition-all duration-500"
-                style={{ width: `${growthPercent}%` }}
-              />
-            </div>
-            <span className="whitespace-nowrap text-sm font-medium text-emerald-700">
-              {stageLabel(effectiveDone)}
-            </span>
-            <span className="whitespace-nowrap text-sm text-zinc-500">
-              🌳 {effectiveDone} 本
-            </span>
-          </div>
+          {showAlbum && currentMonth ? (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setMonthIdx((i) => Math.min(months.length - 1, i + 1))}
+                  disabled={monthIdx >= months.length - 1}
+                  className="rounded-lg bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-700 hover:bg-emerald-200 disabled:opacity-40"
+                >
+                  ← 前の月
+                </button>
+                <div className="text-center">
+                  <div className="text-base font-bold text-emerald-800">
+                    {SEASON_EMOJI[currentMonth.season]} {currentMonth.label}
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    {SEASON_JA[currentMonth.season]}のアルバム ・ {currentMonth.entries.length} 本
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMonthIdx((i) => Math.max(0, i - 1))}
+                  disabled={monthIdx <= 0}
+                  className="rounded-lg bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-700 hover:bg-emerald-200 disabled:opacity-40"
+                >
+                  次の月 →
+                </button>
+              </div>
+              <p className="text-xs text-zinc-500">
+                完了タスクが季節の植物として月ごとに残ります。植物をクリックすると図鑑（Wikipedia 要約）が開きます。
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-emerald-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-lime-400 to-emerald-500 transition-all duration-500"
+                    style={{ width: `${growthPercent}%` }}
+                  />
+                </div>
+                <span className="whitespace-nowrap text-sm font-medium text-emerald-700">
+                  {stageLabel(effectiveDone)}
+                </span>
+                <span className="whitespace-nowrap text-sm text-zinc-500">
+                  🌳 {effectiveDone} 本
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500">
+                完了したタスクの数だけ緑が増えます（全 {total} 件）。10
+                件ごとにレアな植物が芽生え、お祝いが表示されます。
+              </p>
+            </>
+          )}
 
           {loading && <p className="text-xs text-zinc-400">読み込み中…</p>}
           {note && <p className="text-xs text-amber-600">{note}</p>}
-          <p className="text-xs text-zinc-500">
-            完了したタスクの数だけ緑が増えます（全 {total} 件）。10
-            件ごとにレアな植物が芽生え、お祝いが表示されます。
-          </p>
+          {albumNote && <p className="text-xs text-amber-600">{albumNote}</p>}
         </div>
       </div>
     </main>

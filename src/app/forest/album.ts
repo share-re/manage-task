@@ -157,3 +157,18 @@ export async function backfillAlbumFromTasks(tasks: Task[]): Promise<number> {
   if (error) throw error;
   return rows.length;
 }
+
+// Record the office->forest move: stamp moved_at on entries whose office
+// retention has expired (completed before the cutoff) and that aren't stamped
+// yet (design 4.5). Display keys off completed_at, so this can run lazily.
+// Writes only to garden_album. Returns how many rows were stamped.
+export async function stampExpiredAsMoved(now: Date = new Date()): Promise<number> {
+  const { data, error } = await supabase
+    .from("garden_album")
+    .update({ moved_at: now.toISOString() })
+    .lt("completed_at", retentionCutoffISO(now))
+    .is("moved_at", null)
+    .select("id");
+  if (error) throw error;
+  return data?.length ?? 0;
+}

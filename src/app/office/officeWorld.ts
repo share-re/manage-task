@@ -51,7 +51,7 @@ export const STATIONS: {
   ph: number;
 }[] = [
   { id: "task", x: 3.2, z: 6.75, r: 1.65, badge: "📋 タスクを開く", color: "#e8a23a", ph: 0 },
-  { id: "uchida", x: 11.1, z: 11.05, r: 1.75, badge: "💬 内田さんと話す", color: "#2f9e77", ph: 1.6 },
+  { id: "uchida", x: 11.1, z: 11.05, r: 1.75, badge: "💬 内田さんに相談（別タブ）", color: "#2f9e77", ph: 1.6 },
 ];
 
 export type WorldState = {

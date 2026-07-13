@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
+import LogoutButton from "@/components/LogoutButton";
+import PasskeyRegisterButton from "@/components/PasskeyRegisterButton";
 import {
   listTasks,
   taskProgress,
@@ -381,6 +383,10 @@ export default function OfficePage() {
               ))}
             </div>
           </div>
+          <div className="mt-2 flex flex-col items-stretch gap-1.5 border-t border-[rgba(120,90,60,0.15)] pt-2">
+            <PasskeyRegisterButton />
+            <LogoutButton className="self-start rounded-lg px-2 py-1 text-[11px] font-semibold text-[#a08a76] hover:bg-black/5" />
+          </div>
           {note && <p className="mt-2 text-[11px] text-amber-600">{note}</p>}
         </div>
       </div>
@@ -393,7 +399,6 @@ export default function OfficePage() {
           <Link href="/tasks" title="進捗管理" className={navLink}>✅</Link>
           <Link href="/tasks/mail" title="メール" className={navLink}>✉️</Link>
           <Link href="/forest" title="植林" className={navLink}>🌱</Link>
-          <Link href="/" title="トップ" className={navLink}>🏠</Link>
         </div>
       </div>
 

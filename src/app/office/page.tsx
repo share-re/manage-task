@@ -18,7 +18,6 @@ import PlantTooltip from "@/app/forest/PlantTooltip";
 import { RARE_SPECIES_LIST, type Plant } from "@/app/forest/plants";
 import { fetchWeather, type Weather } from "@/app/forest/weather";
 import World from "./World";
-import ChatPanel from "./ChatPanel";
 import RoomChatPanel, { type RoomMsg } from "./RoomChatPanel";
 import { STATUS_EMOJI, STATUS_LABEL, STATUS_ORDER, type PresenceStatus } from "./officeWorld";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -37,6 +36,15 @@ function loadStatus(): PresenceStatus {
   if (typeof window === "undefined") return "working";
   const s = window.localStorage.getItem(STATUS_KEY);
   return s === "working" || s === "busy" || s === "away" || s === "break" ? s : "working";
+}
+
+// Whether the top-left control card is expanded. Collapsed shows just a
+// hamburger so the world is easier to see. Persisted per device like the status
+// (default expanded on first visit).
+const PANEL_KEY = "office-panel-open";
+function loadPanelOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(PANEL_KEY) !== "0";
 }
 
 // Same saturating curve as the /forest view: completing tasks always adds green
@@ -64,7 +72,6 @@ export default function OfficePage() {
   const router = useRouter();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showTasks, setShowTasks] = useState(false);
-  const [showChat, setShowChat] = useState(false);
   const [confirmNav, setConfirmNav] = useState(false); // 進捗管理へ遷移する確認
   const [note, setNote] = useState<string>();
   const loadedRef = useRef(false);
@@ -81,6 +88,12 @@ export default function OfficePage() {
   useEffect(() => {
     try { window.localStorage.setItem(STATUS_KEY, status); } catch {}
   }, [status]);
+
+  // Collapsible top-left control card (persisted).
+  const [panelOpen, setPanelOpen] = useState(loadPanelOpen);
+  useEffect(() => {
+    try { window.localStorage.setItem(PANEL_KEY, panelOpen ? "1" : "0"); } catch {}
+  }, [panelOpen]);
 
   // Editing the display name (user_metadata.name) from the office profile card.
   const [editingName, setEditingName] = useState(false);
@@ -207,7 +220,9 @@ export default function OfficePage() {
         if (done) break;
         acc += decoder.decode(value, { stream: true });
       }
-      const reply = acc.trim();
+      // Drop the web-search sources blob the assistant appends after the SOURCES
+      // separator (\x1e); only the human-readable text belongs in the room chat.
+      const reply = acc.split("")[0].trim();
       if (reply) postAi(reply);
       else if (mention) postAi("今ちょっと応答できないみたい💦");
     } catch {
@@ -236,14 +251,14 @@ export default function OfficePage() {
   };
   // Panels open/close by clicking the toggles — no need to walk over. Tasks and
   // the 内田さん chat are mutually exclusive so they never overlap on the right.
-  const toggleTasks = () => { setShowChat(false); setShowRoomChat(false); setShowTasks((v) => !v); };
-  const toggleChat = () => { setShowTasks(false); setShowRoomChat(false); setShowChat((v) => !v); };
-  const toggleRoomChat = () => { setShowTasks(false); setShowChat(false); setShowRoomChat((v) => !v); };
-  // Clicking a station in the world (task board / 内田さん) opens its panel.
+  const toggleTasks = () => { setShowRoomChat(false); setShowTasks((v) => !v); };
+  const toggleRoomChat = () => { setShowTasks(false); setShowRoomChat((v) => !v); };
+  // Clicking a station: the task board opens inline; 内田さん opens the full
+  // assistant page in a new tab so this tab keeps its office presence alive.
   const openStation = (id: "task" | "uchida") => {
+    if (id === "uchida") { window.open("/assistant", "_blank", "noopener,noreferrer"); return; }
     setShowRoomChat(false);
-    if (id === "task") { setShowChat(false); setShowTasks(true); }
-    else { setShowTasks(false); setShowChat(true); }
+    setShowTasks(true);
   };
 
   function startEditName() {
@@ -297,15 +312,35 @@ export default function OfficePage() {
         onStationDblClick={(id) => { if (id === "task") setConfirmNav(true); }}
       />
 
-      {/* Top-left: compact title + station toggles */}
+      {/* Top-left: compact title + station toggles (collapsible to a hamburger) */}
       <div className="pointer-events-none absolute left-3 top-3 max-w-[min(92vw,290px)]">
+        {!panelOpen ? (
+          <button
+            onClick={() => setPanelOpen(true)}
+            aria-label="メニューを開く"
+            title="メニューを開く"
+            className="pointer-events-auto rounded-xl bg-[rgba(255,253,248,0.92)] px-2.5 py-2 text-base leading-none text-[#4a3b2f] shadow-lg ring-1 ring-[rgba(120,90,60,0.15)] backdrop-blur hover:bg-[rgba(47,158,119,0.12)]"
+          >
+            ☰
+          </button>
+        ) : (
         <div className="pointer-events-auto rounded-2xl bg-[rgba(255,253,248,0.92)] p-3 shadow-lg ring-1 ring-[rgba(120,90,60,0.15)] backdrop-blur">
-          <h1 className="text-sm font-bold text-[#4a3b2f]">
-            <span className="mr-1 text-[#2f9e77]">◆</span>バーチャルオフィス
-          </h1>
+          <div className="flex items-start justify-between gap-2">
+            <h1 className="text-sm font-bold text-[#4a3b2f]">
+              <span className="mr-1 text-[#2f9e77]">◆</span>バーチャルオフィス
+            </h1>
+            <button
+              onClick={() => setPanelOpen(false)}
+              aria-label="メニューを閉じる"
+              title="折りたたむ"
+              className="-mr-1 -mt-0.5 rounded-lg px-1.5 py-1 text-sm leading-none text-[#a08a76] hover:bg-black/5"
+            >
+              ☰
+            </button>
+          </div>
           <p className="mt-1 text-[11px] leading-relaxed text-[#a08a76]">
             <kbd className="rounded bg-black/5 px-1">WASD</kbd>/矢印で移動。
-            下の<b className="text-[#4a3b2f]">ボタン</b>、または世界の<b className="text-[#4a3b2f]">タスク台・内田さん</b>をクリックで開けます（完了 {done}/{total}）
+            下の<b className="text-[#4a3b2f]">ボタン</b>、または世界の<b className="text-[#4a3b2f]">タスク台・内田さん</b>をクリックで開けます（内田さんは別タブ・完了 {done}/{total}）
           </p>
           <div className="mt-2 flex gap-1.5">
             <button
@@ -313,12 +348,6 @@ export default function OfficePage() {
               className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showTasks ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
             >
               📋 進捗
-            </button>
-            <button
-              onClick={toggleChat}
-              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${showChat ? "bg-[#2f9e77] text-white" : "bg-[rgba(47,158,119,0.1)] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.22)]"}`}
-            >
-              🤖 内田さん
             </button>
             <button
               onClick={toggleRoomChat}
@@ -389,6 +418,7 @@ export default function OfficePage() {
           </div>
           {note && <p className="mt-2 text-[11px] text-amber-600">{note}</p>}
         </div>
+        )}
       </div>
 
       {/* Top-right: weather + compact page nav (icons) */}
@@ -399,18 +429,13 @@ export default function OfficePage() {
           <Link href="/tasks" title="進捗管理" className={navLink}>✅</Link>
           <Link href="/tasks/mail" title="メール" className={navLink}>✉️</Link>
           <Link href="/forest" title="植林" className={navLink}>🌱</Link>
+          <a href="/assistant" target="_blank" rel="noopener noreferrer" title="AI内田さん" className={navLink}>🤖</a>
         </div>
       </div>
 
       {showTasks && (
         <div className="pointer-events-none absolute right-4 top-28 z-10">
           <TaskPanel tasks={tasks} onToggle={handleToggle} onClose={() => setShowTasks(false)} />
-        </div>
-      )}
-
-      {showChat && (
-        <div className="pointer-events-none absolute right-4 top-28 z-10">
-          <ChatPanel userName={playerName} onClose={() => setShowChat(false)} />
         </div>
       )}
 

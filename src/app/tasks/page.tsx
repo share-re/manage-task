@@ -8,15 +8,19 @@ import {
   createTask,
   createTasks,
   deleteTasks,
+  leafTasks,
   listTasks,
   taskProgress,
   updateTask,
   updateTaskStatus,
   STATUS_META,
   STATUS_ORDER,
+  PRIORITY_META,
+  PRIORITY_ORDER,
   type Task,
   type TaskEdit,
   type TaskStatus,
+  type TaskPriority,
 } from "@/lib/tasks";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
@@ -26,17 +30,22 @@ function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
 }
 
+// Whole days from today until a due date (UTC day granularity). Negative = overdue.
+function dueDiffDays(due: string): number {
+  const [y, m, d] = due.split("-").map(Number);
+  const dueMs = Date.UTC(y, m - 1, d);
+  const now = new Date();
+  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((dueMs - todayMs) / 86_400_000);
+}
+
 // Deadline badge for an incomplete task: overdue / due today / due within 3 days.
 // Returns null when there's nothing to warn about.
 function dueBadge(
   task: Task,
 ): { label: string; className: string } | null {
   if (task.status === "done" || !task.due_date) return null;
-  const [y, m, d] = task.due_date.split("-").map(Number);
-  const dueMs = Date.UTC(y, m - 1, d);
-  const now = new Date();
-  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const diff = Math.round((dueMs - todayMs) / 86_400_000);
+  const diff = dueDiffDays(task.due_date);
   if (diff < 0)
     return { label: `${-diff}日超過`, className: "bg-red-100 text-red-700" };
   if (diff === 0)
@@ -72,7 +81,7 @@ function filterBySearch(pool: Task[], query: string): Task[] {
   return pool.filter((t) => keep.has(t.id));
 }
 
-type SortKey = "default" | "due" | "assignee" | "status";
+type SortKey = "default" | "due" | "assignee" | "status" | "priority";
 
 // A single task row. Shows the task, an inline status select, and a toggleable
 // comment thread.
@@ -112,6 +121,7 @@ function TaskRow({
   const [eAssignee, setEAssignee] = useState(task.assignee ?? "");
   const [eDue, setEDue] = useState(task.due_date ?? "");
   const [eStatus, setEStatus] = useState<TaskStatus>(task.status);
+  const [ePriority, setEPriority] = useState<TaskPriority>(task.priority);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string>();
 
@@ -123,6 +133,7 @@ function TaskRow({
     setEAssignee(task.assignee ?? "");
     setEDue(task.due_date ?? "");
     setEStatus(task.status);
+    setEPriority(task.priority);
     setEditError(undefined);
     setEditing(true);
   }
@@ -140,6 +151,7 @@ function TaskRow({
         assignee: eAssignee,
         dueDate: eDue,
         status: eStatus,
+        priority: ePriority,
       });
       setEditing(false);
     } catch {
@@ -197,6 +209,11 @@ function TaskRow({
             )}
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+            <span
+              className={`rounded px-1.5 py-0.5 font-medium ${PRIORITY_META[task.priority].badgeClass}`}
+            >
+              {PRIORITY_META[task.priority].label}
+            </span>
             <span>
               {task.assignee || "担当者なし"} ・ {formatDue(task.due_date)}
             </span>
@@ -301,6 +318,20 @@ function TaskRow({
                   {STATUS_ORDER.map((s) => (
                     <option key={s} value={s}>
                       {STATUS_META[s].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">優先度</span>
+                <select
+                  value={ePriority}
+                  onChange={(e) => setEPriority(e.target.value as TaskPriority)}
+                  className={fieldClass}
+                >
+                  {PRIORITY_ORDER.map((p) => (
+                    <option key={p} value={p}>
+                      {PRIORITY_META[p].label}
                     </option>
                   ))}
                 </select>
@@ -462,6 +493,7 @@ export default function TasksPage() {
   const [dueDate, setDueDate] = useState("");
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [parentId, setParentId] = useState<string>("");
+  const [priority, setPriority] = useState<TaskPriority>("mid");
   const [saving, setSaving] = useState(false);
 
   // Filter / sort.
@@ -470,6 +502,7 @@ export default function TasksPage() {
   const [filterStatus, setFilterStatus] = useState<"" | TaskStatus | "open">(
     "",
   );
+  const [filterPriority, setFilterPriority] = useState<"" | TaskPriority>("");
   const [sortKey, setSortKey] = useState<SortKey>("default");
   // Free-text keyword search over task titles. Shared by both tabs.
   const [search, setSearch] = useState("");
@@ -552,7 +585,7 @@ export default function TasksPage() {
           setSaving(false);
           return;
         }
-        const shared = { assignee: assignee.trim(), dueDate, status };
+        const shared = { assignee: assignee.trim(), dueDate, status, priority };
         const created: Task[] = [];
         for (const group of groups) {
           const parent = await createTask({
@@ -580,6 +613,7 @@ export default function TasksPage() {
           assignee: assignee.trim(),
           dueDate,
           status,
+          priority,
           parentId: parentId || null,
         });
         setTasks((prev) => [...prev, created]);
@@ -739,8 +773,11 @@ export default function TasksPage() {
     }
   }
 
-  // Only top-level tasks can be a parent — keeps it 2 levels.
-  const parentOptions = tasks.filter((t) => !t.parent_id);
+  // Only top-level tasks that aren't archived (done) can be a parent — keeps
+  // it 2 levels and stops new tasks being filed under a completed parent.
+  const parentOptions = tasks.filter(
+    (t) => !t.parent_id && t.status !== "done",
+  );
   const assigneeOptions = useMemo(
     () =>
       [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[],
@@ -786,6 +823,7 @@ export default function TasksPage() {
   const filtersActive =
     filterAssignee !== "" ||
     filterStatus !== "" ||
+    filterPriority !== "" ||
     sortKey !== "default" ||
     search.trim() !== "";
 
@@ -797,6 +835,8 @@ export default function TasksPage() {
       list = list.filter((t) => (t.assignee || "") === filterAssignee);
     if (filterStatus && filterStatus !== "open")
       list = list.filter((t) => t.status === filterStatus);
+    if (filterPriority)
+      list = list.filter((t) => t.priority === filterPriority);
     // Keyword search on the title (keeps a matched child's parent for context).
     list = filterBySearch(list, search);
     const comparators: Record<SortKey, (a: Task, b: Task) => number> = {
@@ -806,22 +846,47 @@ export default function TasksPage() {
       assignee: (a, b) => (a.assignee || "").localeCompare(b.assignee || ""),
       status: (a, b) =>
         STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
+      priority: (a, b) =>
+        PRIORITY_META[a.priority].order - PRIORITY_META[b.priority].order,
     };
     if (sortKey !== "default") list.sort(comparators[sortKey]);
     return list;
-  }, [openTasks, filterAssignee, filterStatus, sortKey, search]);
+  }, [openTasks, filterAssignee, filterStatus, filterPriority, sortKey, search]);
 
   const tree = useMemo(() => buildTaskTree(openTasks), [openTasks]);
   // Progress tracks the assignee filter: pick a person to see just their
   // progress, or "すべて" for the whole team. (Status filter is intentionally
   // ignored here — filtering to "done" would always read 100%.)
+  // Progress is counted over LEAF tasks (child + standalone tasks), excluding
+  // parents that only group children — see leafTasks() for why.
+  const leaves = useMemo(() => leafTasks(tasks), [tasks]);
   const progressScope = filterAssignee
-    ? tasks.filter((t) => (t.assignee || "") === filterAssignee)
-    : tasks;
+    ? leaves.filter((t) => (t.assignee || "") === filterAssignee)
+    : leaves;
   const progress = taskProgress(progressScope);
   const progressLabel = filterAssignee
     ? `${filterAssignee} の進捗`
     : "チーム全体の進捗";
+
+  // At-a-glance risk across all incomplete tasks (team-wide; intentionally
+  // ignores the assignee filter — everyone should see what's at risk).
+  const riskSummary = useMemo(() => {
+    let overdue = 0;
+    let dueToday = 0;
+    let dueSoon = 0;
+    let unassigned = 0;
+    for (const t of tasks) {
+      if (t.status === "done") continue;
+      if (!t.assignee) unassigned++;
+      if (t.due_date) {
+        const diff = dueDiffDays(t.due_date);
+        if (diff < 0) overdue++;
+        else if (diff === 0) dueToday++;
+        else if (diff <= 3) dueSoon++;
+      }
+    }
+    return { overdue, dueToday, dueSoon, unassigned };
+  }, [tasks]);
 
   const renderRow = (
     task: Task,
@@ -903,6 +968,30 @@ export default function TasksPage() {
         percent={progress.percent}
         label={progressLabel}
       />
+
+      {/* Risk summary — at-risk tasks at a glance (team-wide, incomplete only) */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {(
+          [
+            ["期限超過", riskSummary.overdue, "text-red-700"],
+            ["本日締切", riskSummary.dueToday, "text-red-700"],
+            ["期限間近", riskSummary.dueSoon, "text-amber-700"],
+            ["担当なし", riskSummary.unassigned, "text-zinc-600"],
+          ] as const
+        ).map(([label, n, cls]) => (
+          <div
+            key={label}
+            className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-black/5"
+          >
+            <div
+              className={`text-xl font-semibold ${n > 0 ? cls : "text-zinc-300"}`}
+            >
+              {n}
+            </div>
+            <div className="text-[11px] text-zinc-500">{label}</div>
+          </div>
+        ))}
+      </div>
 
       {/* Sticky header: tabs + toolbar stay visible while the list scrolls. */}
       <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-zinc-200 bg-zinc-50 px-4 pt-1">
@@ -1007,6 +1096,21 @@ export default function TasksPage() {
             ))}
           </select>
           <select
+            value={filterPriority}
+            onChange={(e) =>
+              setFilterPriority(e.target.value as "" | TaskPriority)
+            }
+            aria-label="優先度で絞り込み"
+            className={`${inputClass} max-w-[8rem] py-1.5`}
+          >
+            <option value="">優先度：すべて</option>
+            {PRIORITY_ORDER.map((p) => (
+              <option key={p} value={p}>
+                {PRIORITY_META[p].label}
+              </option>
+            ))}
+          </select>
+          <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             aria-label="並び替え"
@@ -1014,6 +1118,7 @@ export default function TasksPage() {
           >
             <option value="default">並び順：既定</option>
             <option value="due">期限が近い順</option>
+            <option value="priority">優先度が高い順</option>
             <option value="assignee">担当者順</option>
             <option value="status">状態順</option>
           </select>
@@ -1136,6 +1241,21 @@ export default function TasksPage() {
                 {STATUS_ORDER.map((s) => (
                   <option key={s} value={s}>
                     {STATUS_META[s].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-700">優先度</span>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                className={inputClass}
+              >
+                {PRIORITY_ORDER.map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_META[p].label}
                   </option>
                 ))}
               </select>

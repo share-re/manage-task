@@ -171,6 +171,12 @@ export default function SkyHero({
             }}
           />
         </div>
+        <p
+          className="mt-1 text-[11px] font-medium"
+          style={{ color: sky.text }}
+        >
+          完了 {done} / 実作業 {total} 件（{percent}%）
+        </p>
         <div className="mt-1.5 flex gap-1">
           {Array.from({ length: TOTAL_TREES }).map((_, i) => {
             // Fill from the RIGHT: the rightmost `done` trees turn green.

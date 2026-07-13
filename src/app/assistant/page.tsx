@@ -588,7 +588,7 @@ export default function AssistantPage() {
                   type="button"
                   onClick={retry}
                   title="同じ質問を、いまのモードで答え直します"
-                  className="mt-1 rounded-full px-2 py-0.5 text-xs text-emerald-700 ring-1 ring-emerald-600/30 transition hover:bg-emerald-50"
+                  className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-600/40 transition hover:bg-emerald-200"
                 >
                   🔄 考え直して
                 </button>

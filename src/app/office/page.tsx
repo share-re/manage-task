@@ -64,6 +64,12 @@ export default function OfficePage() {
     try { window.localStorage.setItem(STATUS_KEY, status); } catch {}
   }, [status]);
 
+  // Editing the display name (user_metadata.name) from the office profile card.
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameError, setNameError] = useState<string>();
+  const [savingName, setSavingName] = useState(false);
+
   // Real weather (reused from /forest); "?weather=clear|clouds|rain|snow" forces one.
   const [weather, setWeather] = useState<Weather>("clear");
   const [demoWeather] = useState<Weather | null>(() => {
@@ -153,6 +159,26 @@ export default function OfficePage() {
     else { setShowTasks(false); setShowChat(true); }
   };
 
+  function startEditName() {
+    setNameDraft(playerName);
+    setNameError(undefined);
+    setEditingName(true);
+  }
+  // Save the display name to user_metadata; AuthProvider's USER_UPDATED event
+  // then refreshes the session so the new name flows everywhere (incl. presence).
+  async function saveName() {
+    const next = nameDraft.trim();
+    if (!next) { setNameError("名前を入力してください。"); return; }
+    if (next.length > 20) { setNameError("20文字以内で入力してください。"); return; }
+    if (next === playerName) { setEditingName(false); return; }
+    setSavingName(true);
+    setNameError(undefined);
+    const { error } = await supabase.auth.updateUser({ data: { name: next } });
+    setSavingName(false);
+    if (error) { setNameError("変更に失敗しました。時間をおいて再度お試しください。"); return; }
+    setEditingName(false);
+  }
+
   function handlePick(species: string | null, x: number, y: number) {
     if (species) {
       cancelClose();
@@ -207,6 +233,46 @@ export default function OfficePage() {
             >
               🤖 内田さん
             </button>
+          </div>
+          <div className="mt-2">
+            <p className="text-[10px] font-semibold text-[#a08a76]">あなた</p>
+            {editingName ? (
+              <div className="mt-1 flex items-center gap-1">
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                  maxLength={20}
+                  className="min-w-0 flex-1 rounded-lg border border-[rgba(120,90,60,0.25)] bg-white px-2 py-1 text-xs text-[#4a3b2f] outline-none focus:border-[#2f9e77]"
+                />
+                <button
+                  onClick={saveName}
+                  disabled={savingName}
+                  className="rounded-lg bg-[#2f9e77] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#268768] disabled:opacity-50"
+                >
+                  {savingName ? "…" : "保存"}
+                </button>
+                <button
+                  onClick={() => setEditingName(false)}
+                  className="rounded-lg px-1.5 py-1 text-[11px] text-[#a08a76] hover:bg-black/5"
+                >
+                  ×
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 flex items-center gap-1">
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#4a3b2f]">{playerName}</span>
+                <button
+                  onClick={startEditName}
+                  title="表示名を変更"
+                  className="rounded-lg px-1.5 py-1 text-[11px] text-[#2f9e77] hover:bg-[rgba(47,158,119,0.15)]"
+                >
+                  ✏️ 変更
+                </button>
+              </div>
+            )}
+            {nameError && <p className="mt-1 text-[10px] text-amber-600">{nameError}</p>}
           </div>
           <div className="mt-2">
             <p className="text-[10px] font-semibold text-[#a08a76]">ステータス</p>

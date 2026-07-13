@@ -520,10 +520,10 @@ export default function AssistantPage() {
           </div>
         </div>
         <Link
-          href="/"
+          href="/office"
           className="whitespace-nowrap rounded-lg bg-white/70 px-3 py-1 text-sm text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
         >
-          ← トップ
+          オフィスへ
         </Link>
       </header>
 

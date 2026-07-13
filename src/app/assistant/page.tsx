@@ -57,7 +57,7 @@ export default function AssistantPage() {
   // 保存中の会話ID。最初の送信で会話を作り、以降はこの会話に発言を足していく。
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]); // 履歴一覧
-  const [showHistory, setShowHistory] = useState(false); // 履歴パネルの開閉
+  const [sidebarOpen, setSidebarOpen] = useState(false); // スマホ用サイドバー（履歴）の開閉
   const [saveEnabled, setSaveEnabled] = useState(true); // この会話を保存するか（プライバシー）
   const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
   const textareaRef = useRef<HTMLTextAreaElement>(null); // 入力欄。高さの自動調整に使う
@@ -344,7 +344,7 @@ export default function AssistantPage() {
       const rows = await getMessages(id);
       setMessages(rows.map((r) => ({ role: r.role, text: r.text })));
       setConversationId(id);
-      setShowHistory(false);
+      setSidebarOpen(false);
       setError(undefined);
     } catch (e) {
       console.error("会話の読み込みに失敗:", e);
@@ -357,7 +357,7 @@ export default function AssistantPage() {
     setMessages([]);
     setConversationId(null);
     setInput("");
-    setShowHistory(false);
+    setSidebarOpen(false);
     setError(undefined);
   }
 
@@ -397,7 +397,7 @@ export default function AssistantPage() {
   return (
     // このページだけ常にライト表示に固定（OSがダークでも反転させない）。
     <div
-      className="relative min-h-screen text-zinc-900"
+      className="relative flex min-h-screen text-zinc-900"
       style={{ colorScheme: "light" }}
     >
       {/* 植林（/forest）トーンの背景。装飾なので操作対象から外す（aria-hidden / pointer-events-none）。 */}
@@ -608,97 +608,146 @@ export default function AssistantPage() {
         ))}
       </div>
 
-      <main className="relative z-10 mx-auto flex h-[100dvh] w-full max-w-2xl flex-col px-4 py-6">
-      {/* ヘッダー（白い半透明カード） */}
-      <header className="mb-4 flex items-center justify-between gap-3 rounded-2xl bg-white/85 px-4 py-3 shadow-sm ring-1 ring-black/5 backdrop-blur">
-        <div className="flex items-center gap-3">
-          {/* 芽のアバター */}
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-lg">
+      {/* スマホでサイドバーを開いたときの背景（タップで閉じる） */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      {/* 左サイドバー：新しい会話＋履歴一覧。PCは常時表示、スマホは☰で開閉する引き出し。 */}
+      <aside
+        className={
+          "fixed inset-y-0 left-0 z-30 flex w-64 shrink-0 transform flex-col bg-white/95 shadow-lg ring-1 ring-black/5 backdrop-blur transition-transform md:static md:z-10 md:translate-x-0 md:shadow-none md:ring-0 " +
+          (sidebarOpen ? "translate-x-0" : "-translate-x-full")
+        }
+      >
+        {/* ブランド */}
+        <div className="flex items-center gap-2 px-3 pb-2 pt-4">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-base">
             🌱
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-emerald-800">AI内田さん</h1>
-            <p className="text-xs text-emerald-700/70">
-              内田さんをモデルにしたAIです（本人ではありません）
-            </p>
-          </div>
+          <span className="font-bold text-emerald-800">AI内田さん</span>
+          {/* スマホ用の閉じるボタン */}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="サイドバーを閉じる"
+            className="ml-auto rounded p-1 text-zinc-400 transition hover:bg-zinc-100 md:hidden"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {/* 新しい会話を始める */}
+
+        {/* 新しい会話 */}
+        <div className="px-3 pb-2">
           <button
             type="button"
             onClick={newConversation}
-            className="whitespace-nowrap rounded-lg bg-white/70 px-2.5 py-1 text-xs text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
+            className="flex w-full items-center justify-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700"
           >
-            ＋ 新規
+            ＋ 新しい会話
           </button>
+        </div>
 
-          {/* 履歴（過去の会話一覧）。ボタンでパネルを開閉する。 */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowHistory((v) => !v)}
-              aria-expanded={showHistory}
-              className="whitespace-nowrap rounded-lg bg-white/70 px-2.5 py-1 text-xs text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
-            >
-              履歴
-            </button>
-            {showHistory && (
-              <div className="absolute right-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg bg-white p-1 shadow-lg ring-1 ring-black/10">
-                {conversations.length === 0 ? (
-                  <p className="p-2 text-xs text-zinc-500">
-                    まだ保存された会話はありません。
-                  </p>
-                ) : (
-                  conversations.map((c) => (
-                    <div
-                      key={c.id}
-                      className="flex items-center gap-1 rounded-md pr-1 hover:bg-emerald-50"
+        <div className="px-3 pb-1 text-xs text-zinc-400">履歴</div>
+
+        {/* 会話一覧 */}
+        <div className="flex-1 overflow-y-auto px-2 pb-3">
+          {conversations.length === 0 ? (
+            <p className="px-2 py-2 text-xs text-zinc-500">
+              まだ保存された会話はありません。
+            </p>
+          ) : (
+            conversations.map((c) => {
+              const active = c.id === conversationId;
+              return (
+                <div
+                  key={c.id}
+                  className={
+                    "flex items-center gap-1 rounded-md pr-1 " +
+                    (active ? "bg-emerald-100" : "hover:bg-emerald-50")
+                  }
+                >
+                  <button
+                    type="button"
+                    onClick={() => openConversation(c.id)}
+                    className={
+                      "flex min-w-0 flex-1 items-baseline justify-between gap-2 px-2 py-1.5 text-left text-sm " +
+                      (active ? "text-emerald-800" : "text-zinc-700")
+                    }
+                  >
+                    <span className="truncate">{c.title || "（無題）"}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-400">
+                      {new Date(c.updated_at).toLocaleDateString("ja-JP")}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeConversation(c.id)}
+                    aria-label="この会話を削除"
+                    title="削除"
+                    className="shrink-0 rounded p-1 text-zinc-400 transition hover:bg-red-50 hover:text-red-600"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
                     >
-                      <button
-                        type="button"
-                        onClick={() => openConversation(c.id)}
-                        className="flex min-w-0 flex-1 items-baseline justify-between gap-2 px-2 py-1.5 text-left text-sm text-zinc-700"
-                      >
-                        <span className="truncate">{c.title || "（無題）"}</span>
-                        <span className="shrink-0 text-[10px] text-zinc-400">
-                          {new Date(c.updated_at).toLocaleDateString("ja-JP")}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeConversation(c.id)}
-                        aria-label="この会話を削除"
-                        title="削除"
-                        className="shrink-0 rounded p-1 text-zinc-400 transition hover:bg-red-50 hover:text-red-600"
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          width="14"
-                          height="14"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+                      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
 
+        {/* フッター：オフィスへ */}
+        <div className="border-t border-black/5 px-3 py-3">
           <Link
             href="/office"
-            className="whitespace-nowrap rounded-lg bg-white/70 px-2.5 py-1 text-xs text-emerald-700 ring-1 ring-emerald-600/20 transition hover:bg-white"
+            className="inline-flex items-center gap-1 text-sm text-emerald-700 transition hover:text-emerald-900"
           >
-            オフィスへ
+            ← オフィスへ
           </Link>
+        </div>
+      </aside>
+
+      <main className="relative z-10 flex h-[100dvh] min-w-0 flex-1 flex-col px-4 py-6">
+        <div className="mx-auto flex h-full w-full max-w-2xl flex-col">
+      {/* ヘッダー（白い半透明カード） */}
+      <header className="mb-4 flex items-center gap-3 rounded-2xl bg-white/85 px-4 py-3 shadow-sm ring-1 ring-black/5 backdrop-blur">
+        {/* スマホ：サイドバー（履歴）を開く */}
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          aria-label="履歴を開く"
+          className="-ml-1 shrink-0 rounded-lg p-1 text-emerald-700 transition hover:bg-emerald-50 md:hidden"
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        {/* 芽のアバター */}
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-lg">
+          🌱
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-emerald-800">AI内田さん</h1>
+          <p className="truncate text-xs text-emerald-700/70">
+            内田さんをモデルにしたAIです（本人ではありません）
+          </p>
         </div>
       </header>
 
@@ -875,6 +924,7 @@ export default function AssistantPage() {
           </button>
         )}
       </form>
+        </div>
       </main>
     </div>
   );

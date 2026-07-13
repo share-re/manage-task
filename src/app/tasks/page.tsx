@@ -478,6 +478,8 @@ export default function TasksPage() {
   const [tab, setTab] = useState<"open" | "archive">("open");
   // Toggles the centered "変更を保存しました" dialog after an edit is saved.
   const [savedModal, setSavedModal] = useState(false);
+  // The task pending deletion (opens a centered confirm dialog); null = closed.
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
   // Which archived parent tasks are expanded to reveal their completed children.
   const [expandedArchive, setExpandedArchive] = useState<Set<string>>(
     new Set(),
@@ -720,13 +722,15 @@ export default function TasksPage() {
     }
   }
 
-  async function handleDelete(task: Task) {
+  // Open the centered confirm dialog; the actual deletion runs in confirmDelete.
+  function handleDelete(task: Task) {
+    setDeleteTarget(task);
+  }
+
+  async function confirmDelete() {
+    const task = deleteTarget;
+    if (!task) return;
     const children = tasks.filter((t) => t.parent_id === task.id);
-    const message =
-      children.length > 0
-        ? `「${task.title}」と、ぶら下がる子タスク${children.length}件を削除します。よろしいですか？`
-        : `「${task.title}」を削除します。よろしいですか？`;
-    if (!window.confirm(message)) return;
     const ids = [...children.map((c) => c.id), task.id];
     try {
       // Delete children first so the parent_id foreign key isn't violated.
@@ -736,6 +740,8 @@ export default function TasksPage() {
     } catch (err) {
       console.error(err);
       setError("削除に失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setDeleteTarget(null);
     }
   }
 
@@ -1274,6 +1280,48 @@ export default function TasksPage() {
             >
               OK
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Centered confirmation before deleting a task. */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="flex w-full max-w-xs flex-col gap-3 rounded-2xl bg-white px-6 py-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-base font-medium text-zinc-900">
+              タスクを削除しますか？
+            </p>
+            <p className="text-sm text-zinc-600">
+              「{deleteTarget.title}」を削除します。
+              {tasks.filter((t) => t.parent_id === deleteTarget.id).length >
+                0 &&
+                `ぶら下がる子タスク${tasks.filter((t) => t.parent_id === deleteTarget.id).length}件も一緒に削除されます。`}
+              この操作は取り消せません。
+            </p>
+            <div className="mt-1 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-lg border border-zinc-300 px-4 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-500"
+              >
+                削除する
+              </button>
+            </div>
           </div>
         </div>
       )}

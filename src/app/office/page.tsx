@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import LogoutButton from "@/components/LogoutButton";
@@ -14,12 +14,18 @@ import {
   type Task,
 } from "@/lib/tasks";
 import TaskPanel from "@/app/forest/TaskPanel";
-import PlantTooltip from "@/app/forest/PlantTooltip";
-import { RARE_SPECIES_LIST, type Plant } from "@/app/forest/plants";
+import { getSpecies } from "@/app/forest/plants";
+import { isWithinRetention } from "@/app/forest/album";
 import { fetchWeather, type Weather } from "@/app/forest/weather";
 import World from "./World";
 import RoomChatPanel, { type RoomMsg } from "./RoomChatPanel";
-import { STATUS_EMOJI, STATUS_LABEL, STATUS_ORDER, type PresenceStatus } from "./officeWorld";
+import {
+  STATUS_EMOJI,
+  STATUS_LABEL,
+  STATUS_ORDER,
+  buildOfficePlants,
+  type PresenceStatus,
+} from "./officeWorld";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 // 内田さん auto-joins the room chat when a message hits one of these words (with a
@@ -109,8 +115,9 @@ export default function OfficePage() {
     return wq === "clear" || wq === "clouds" || wq === "rain" || wq === "snow" ? wq : null;
   });
 
-  // Plant detail tooltip on hovering a tree (reuses /forest PlantTooltip + wiki).
-  const [picked, setPicked] = useState<{ plant: Plant; x: number; y: number } | null>(null);
+  // Name-only label on hovering an office plant. The wiki/図鑑 lives in /forest
+  // (the album), so the office stays a light "working now" backdrop (#23).
+  const [picked, setPicked] = useState<{ name: string; x: number; y: number } | null>(null);
   const closeTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -284,8 +291,7 @@ export default function OfficePage() {
   function handlePick(species: string | null, x: number, y: number) {
     if (species) {
       cancelClose();
-      const isRare = RARE_SPECIES_LIST.some((s) => s.key === species);
-      setPicked({ plant: { id: 0, kind: isRare ? "rare" : "normal", species, x: 0, y: 0 }, x, y });
+      setPicked({ name: getSpecies(species).ja, x, y });
     } else {
       scheduleClose();
     }
@@ -293,6 +299,25 @@ export default function OfficePage() {
 
   const { done, total } = taskProgress(tasks);
   const progress = growthFromDone(done);
+
+  // One plant per completed task within the office retention window (#23). The
+  // COUNT is exactly the number of such tasks: creating a task (todo) adds none,
+  // 0 completed → 0 plants, and un-completing a task (done→todo) drops its plant.
+  // Positions/species are deterministic per task id, so plants don't reshuffle.
+  const officePlants = useMemo(
+    () =>
+      buildOfficePlants(
+        tasks
+          .filter(
+            (t) =>
+              t.status === "done" &&
+              t.completed_at &&
+              isWithinRetention(t.completed_at),
+          )
+          .map((t) => ({ id: t.id, completedAt: t.completed_at as string })),
+      ),
+    [tasks],
+  );
   const effectiveWeather = demoWeather ?? weather;
   const weatherIcon =
     effectiveWeather === "rain" ? "🌧️" : effectiveWeather === "snow" ? "❄️" : effectiveWeather === "clouds" ? "☁️" : "☀️";
@@ -307,6 +332,7 @@ export default function OfficePage() {
         playerColor={playerColor}
         status={status}
         weather={effectiveWeather}
+        plants={officePlants}
         onPickPlant={handlePick}
         onStationClick={openStation}
         onStationDblClick={(id) => { if (id === "task") setConfirmNav(true); }}
@@ -446,15 +472,12 @@ export default function OfficePage() {
       )}
 
       {picked && (
-        <PlantTooltip
-          key={picked.plant.species}
-          plant={picked.plant}
-          x={picked.x}
-          y={picked.y}
-          onKeepOpen={cancelClose}
-          onRequestClose={scheduleClose}
-          onClose={() => setPicked(null)}
-        />
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-lg bg-[rgba(255,253,248,0.96)] px-2.5 py-1 text-xs font-semibold text-[#4a3b2f] shadow-lg ring-1 ring-[rgba(120,90,60,0.18)]"
+          style={{ left: picked.x, top: picked.y - 10 }}
+        >
+          🌿 {picked.name}
+        </div>
       )}
 
       {confirmNav && (

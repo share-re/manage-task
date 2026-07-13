@@ -5,9 +5,11 @@
 // never re-runs the animation loop.
 
 import {
-  COMMON_SPECIES,
-  RARE_SPECIES_LIST,
   getSpecies,
+  hashId,
+  seasonOf,
+  speciesFor,
+  type Season,
 } from "@/app/forest/plants";
 import type { Weather } from "@/app/forest/weather";
 
@@ -60,6 +62,7 @@ export type WorldState = {
   targetP: number;
   weather: Weather;
   hour: number; // local time of day (0..24) for the window sun/sky
+  plants: OfficePlant[]; // one seasonal plant per recently-completed task (#23)
 };
 
 // Where a teammate stands when they arrive: a seat in one of the zones
@@ -171,23 +174,60 @@ export function srand(i: number): number {
   return s - Math.floor(s);
 }
 
-// Fixed tree slots; each is a real species (every 5th rare), reusing /forest.
-export type OfficeTree = { x: number; y: number; s: number; species: string; kind: "normal" | "rare" };
-const RAW_TREES = [
-  { x: 1.9, y: 9.6, s: 0.1 }, { x: 22.1, y: 5.8, s: 0.1 }, { x: 11, y: 14.2, s: 0.2 },
-  { x: 2.0, y: 7.0, s: 0.3 }, { x: 22.0, y: 10.6, s: 0.3 }, { x: 15, y: 13.9, s: 0.4 },
-  { x: 6.9, y: 9.8, s: 0.5 }, { x: 18, y: 9.8, s: 0.6 }, { x: 6.6, y: 12.6, s: 0.6 },
-  { x: 12.4, y: 2.7, s: 0.7 }, { x: 2.3, y: 2.9, s: 0.7 }, { x: 16.6, y: 2.7, s: 0.8 },
-  { x: 21.4, y: 2.9, s: 0.9 }, { x: 5.6, y: 14.2, s: 0.9 }, { x: 14.4, y: 8.2, s: 1 },
-];
-export const OFFICE_TREES: OfficeTree[] = RAW_TREES.map((tr, i) => {
-  const isRare = i % 5 === 4;
-  const list = isRare ? RARE_SPECIES_LIST : COMMON_SPECIES;
-  const sp = list[Math.floor(srand(i * 7.3) * list.length)];
-  return { ...tr, species: sp.key, kind: isRare ? "rare" : "normal" };
-});
-function treeGrow(tr: OfficeTree, dispP: number): number {
-  return Math.max(0, Math.min(1, (dispP - tr.s + 0.15) / 0.15));
+// Seasonal album (#23): the office shows exactly ONE plant per recently-completed
+// task, so the room reflects the "working now" cycle. Not driven by the progress
+// ratio (that only feeds the ambient greenery) — the plant COUNT equals the number
+// of completed tasks within the office retention window. species is decided
+// deterministically from the completion season + task id (reuses /forest).
+export type OfficePlant = {
+  id: string; // source task id (stable seed + hit-test key)
+  x: number;
+  y: number; // map row (used as the z/depth coordinate, like the old trees)
+  s: number; // scale (smaller/lighter than the /forest garden)
+  species: string;
+  season: Season;
+  form: "tree" | "flower";
+};
+
+// Cap on how many plants are drawn at once, to keep the frame cheap. Beyond this
+// the newest completions win (older ones are still in the /forest album).
+export const OFFICE_PLANT_MAX = 48;
+
+// A stable, collision-avoiding spot for a task's plant: hash the id into map
+// coordinates and reject positions on furniture/walls/paths (blocked). Falls back
+// to a ring near the walls if every sampled spot is blocked (rare).
+function officePlantPos(id: string): { x: number; z: number } {
+  for (let k = 0; k < 12; k++) {
+    const x = 1.7 + hashId(id + ":x" + k) * (COLS - 3.4);
+    const z = 2.4 + hashId(id + ":z" + k) * (ROWS - 4.2);
+    if (!blocked(x, z)) return { x, z };
+  }
+  const a = hashId(id) * Math.PI * 2;
+  return { x: COLS / 2 + Math.cos(a) * 9, z: ROWS / 2 + Math.sin(a) * 5.4 };
+}
+
+// Build the office plant list from the completed tasks that are still within the
+// retention window (already filtered by the caller). One plant per task — never
+// per created task, and none when nothing is completed.
+export function buildOfficePlants(
+  completed: { id: string; completedAt: string }[],
+): OfficePlant[] {
+  // Newest completions first, so the cap keeps the freshest cycle.
+  const sorted = [...completed].sort((a, b) =>
+    a.completedAt < b.completedAt ? 1 : a.completedAt > b.completedAt ? -1 : 0,
+  );
+  if (sorted.length > OFFICE_PLANT_MAX) {
+    console.info(
+      `office: ${sorted.length} completed within retention; drawing newest ${OFFICE_PLANT_MAX}.`,
+    );
+  }
+  return sorted.slice(0, OFFICE_PLANT_MAX).map((c) => {
+    const season = seasonOf(c.completedAt);
+    const species = speciesFor(season, c.id);
+    const form = getSpecies(species).form === "flower" ? "flower" : "tree";
+    const { x, z } = officePlantPos(c.id);
+    return { id: c.id, x, y: z, s: 0.5 + hashId(c.id + ":s") * 0.28, species, season, form };
+  });
 }
 
 const SKIN = "#ffd9b3";
@@ -217,14 +257,13 @@ export function viewTransform(player: Actor | undefined, W: number, H: number) {
   oy = Math.max(0, Math.min(MAPH - vh, oy));
   return { scale, ox, oy };
 }
-export function treeAt(sx: number, sy: number, W: number, H: number, player: Actor | undefined, dispP: number): OfficeTree | null {
+export function officePlantAt(sx: number, sy: number, W: number, H: number, player: Actor | undefined, plants: OfficePlant[]): OfficePlant | null {
   const { scale, ox, oy } = viewTransform(player, W, H);
   const wx = sx / scale + ox, wy = sy / scale + oy;
-  let hit: OfficeTree | null = null, best = 1e9;
-  for (const tr of OFFICE_TREES) {
-    if (treeGrow(tr, dispP) <= 0.05) continue;
-    const d = Math.hypot(wx - tr.x * T, wy - (tr.y * T - 34));
-    if (d < 34 && d < best) { best = d; hit = tr; }
+  let hit: OfficePlant | null = null, best = 1e9;
+  for (const p of plants) {
+    const d = Math.hypot(wx - p.x * T, wy - (p.y * T - 26 * p.s));
+    if (d < 30 && d < best) { best = d; hit = p; }
   }
   return hit;
 }
@@ -352,25 +391,38 @@ function lighten(hex: string, f: number): string {
   const mix = (c: number) => Math.round(c + (255 - c) * f);
   return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
 }
-function drawTree(ctx: CanvasRenderingContext2D, tr: OfficeTree, t: number, dispP: number) {
-  const grow = treeGrow(tr, dispP);
-  if (grow <= 0.01) return;
-  const px = tr.x * T, py = tr.y * T;
-  const s = grow * (0.85 + srand(tr.x * 7 + tr.y) * 0.3);
-  const sway = Math.sin(t * 1.2 + tr.x * 3) * 2 * s;
-  const base = getSpecies(tr.species).color;
-  if (tr.kind === "rare") { ctx.fillStyle = `rgba(240,200,90,${0.12 * grow})`; ctx.beginPath(); ctx.arc(px, py - 40 * s, 34 * s, 0, 7); ctx.fill(); }
-  ctx.fillStyle = "rgba(40,60,30,0.20)"; ctx.beginPath(); ctx.ellipse(px, py + 3, 24 * s, 8 * s, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = "#7a5236"; rr(ctx, px - 5 * s, py - 34 * s, 10 * s, 36 * s, 4 * s); ctx.fill();
+// A seasonal plant in the office. Smaller/lighter than the /forest garden (this
+// is the "working now" backdrop). Trees and flowers share the same shadow.
+function drawOfficePlant(ctx: CanvasRenderingContext2D, p: OfficePlant, t: number) {
+  const px = p.x * T, py = p.y * T, s = p.s;
+  const base = getSpecies(p.species).color;
+  ctx.fillStyle = "rgba(40,60,30,0.16)"; ctx.beginPath(); ctx.ellipse(px, py + 3, 15 * s, 5 * s, 0, 0, 7); ctx.fill();
+  if (p.form === "flower") { drawOfficeFlower(ctx, px, py, s, t, base); return; }
+  const sway = Math.sin(t * 1.2 + px) * 1.6 * s;
+  ctx.fillStyle = "#7a5236"; rr(ctx, px - 3.5 * s, py - 24 * s, 7 * s, 26 * s, 3 * s); ctx.fill();
   const layers = [base, lighten(base, 0.12), lighten(base, 0.24)];
   for (let i = 0; i < 3; i++) {
     ctx.fillStyle = layers[i];
     ctx.beginPath();
-    ctx.arc(px + sway * (i + 1) * 0.3, py - (38 + i * 16) * s, (26 - i * 5) * s, 0, 7);
-    ctx.arc(px - 14 * s + sway * 0.2, py - (32 + i * 12) * s, (18 - i * 4) * s, 0, 7);
-    ctx.arc(px + 14 * s + sway * 0.4, py - (32 + i * 12) * s, (18 - i * 4) * s, 0, 7);
+    ctx.arc(px + sway * (i + 1) * 0.3, py - (28 + i * 11) * s, (18 - i * 3.5) * s, 0, 7);
+    ctx.arc(px - 10 * s + sway * 0.2, py - (24 + i * 8) * s, (12 - i * 2.5) * s, 0, 7);
+    ctx.arc(px + 10 * s + sway * 0.4, py - (24 + i * 8) * s, (12 - i * 2.5) * s, 0, 7);
     ctx.fill();
   }
+}
+
+function drawOfficeFlower(ctx: CanvasRenderingContext2D, px: number, py: number, s: number, t: number, color: string) {
+  const sway = Math.sin(t * 1.5 + px) * 1.4 * s;
+  ctx.strokeStyle = "#4f8f4f"; ctx.lineWidth = 2 * s;
+  ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + sway, py - 19 * s); ctx.stroke();
+  ctx.fillStyle = "#5d9e5d"; ctx.beginPath(); ctx.ellipse(px - 3 * s, py - 9 * s, 4 * s, 2 * s, -0.6, 0, 7); ctx.fill();
+  const cx = px + sway, cy = py - 21 * s;
+  ctx.fillStyle = color;
+  for (let k = 0; k < 5; k++) {
+    const a = (k * Math.PI * 2) / 5 + 0.3;
+    ctx.beginPath(); ctx.ellipse(cx + Math.cos(a) * 5 * s, cy + Math.sin(a) * 5 * s, 3.6 * s, 2.4 * s, a, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = "#fff3c0"; ctx.beginPath(); ctx.arc(cx, cy, 2.6 * s, 0, 7); ctx.fill();
 }
 
 function drawChar(ctx: CanvasRenderingContext2D, a: Actor, t: number) {
@@ -597,7 +649,7 @@ export function drawWorld(ctx: CanvasRenderingContext2D, W: number, H: number, s
   // Depth-sorted furniture + trees + characters
   const items = [
     ...FURN.map((f) => ({ key: f.zk != null ? f.y * T + f.zk : (f.y + f.h) * T, draw: () => drawFurn(ctx, f) })),
-    ...OFFICE_TREES.map((tr) => ({ key: tr.y * T + 4, draw: () => drawTree(ctx, tr, t, dispP) })),
+    ...state.plants.map((p) => ({ key: p.y * T + 4, draw: () => drawOfficePlant(ctx, p, t) })),
     ...state.actors.map((a) => ({ key: a.z * T + 6, draw: () => drawChar(ctx, a, t) })),
   ].sort((a, b) => a.key - b.key);
   for (const it of items) it.draw();

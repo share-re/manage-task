@@ -7,12 +7,13 @@ import {
   moveActor,
   seatForUser,
   seatForStatus,
-  treeAt,
+  officePlantAt,
   viewTransform,
   STATIONS,
   T,
   type Actor,
   type Facing,
+  type OfficePlant,
   type PresenceStatus,
   type StationId,
   type WorldState,
@@ -26,6 +27,9 @@ type Props = {
   playerColor: string;
   status: PresenceStatus;
   weather: Weather;
+  // One seasonal plant per recently-completed task (#23). The COUNT equals the
+  // number of completed tasks in the retention window (computed by the page).
+  plants: OfficePlant[];
   onPickPlant?: (species: string | null, x: number, y: number) => void;
   // Fired when the player walks into / out of a station's radius, so the page
   // can auto-open (or close) the matching panel — the "近づくと開く" HUD.
@@ -57,7 +61,7 @@ const AI: Actor = {
   face: "down", ph: 5, ai: true, glasses: true,
 };
 
-export default function World({ progress, playerName, userId, playerColor, status, weather, onPickPlant, onStationChange, onStationClick, onStationDblClick }: Props) {
+export default function World({ progress, playerName, userId, playerColor, status, weather, plants, onPickPlant, onStationChange, onStationClick, onStationDblClick }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keys = useRef<Record<string, boolean>>({});
   const moveTargetRef = useRef<{ x: number; z: number } | null>(null); // click-to-move goal
@@ -69,12 +73,14 @@ export default function World({ progress, playerName, userId, playerColor, statu
   const remotesRef = useRef<Map<string, Remote>>(new Map());
   const worldRef = useRef({ dispP: 0, targetP: 0 });
   const weatherRef = useRef<Weather>(weather);
+  const plantsRef = useRef<OfficePlant[]>(plants);
   const nearRef = useRef<Record<StationId, boolean>>({ task: false, uchida: false });
   const onStationRef = useRef(onStationChange);
   const metaDirtyRef = useRef(false); // set when self meta (status / name) changes → re-track now
 
   useEffect(() => { worldRef.current.targetP = progress; }, [progress]);
   useEffect(() => { weatherRef.current = weather; }, [weather]);
+  useEffect(() => { plantsRef.current = plants; }, [plants]);
   useEffect(() => { onStationRef.current = onStationChange; });
   useEffect(() => { selfRef.current.name = playerName; selfRef.current.shirt = playerColor; metaDirtyRef.current = true; }, [playerName, playerColor]);
   useEffect(() => { selfRef.current.status = status; metaDirtyRef.current = true; }, [status]);
@@ -229,6 +235,7 @@ export default function World({ progress, playerName, userId, playerColor, statu
           weather: weatherRef.current,
           hour: clock.getHours() + clock.getMinutes() / 60,
           actors: [me, AI, ...remotesRef.current.values()],
+          plants: plantsRef.current,
         };
         drawWorld(ctx!, w, h, state, now / 1000);
       }
@@ -262,10 +269,10 @@ export default function World({ progress, playerName, userId, playerColor, statu
           const canvas = canvasRef.current;
           if (!canvas) return;
           const rect = canvas.getBoundingClientRect();
-          const tr = treeAt(
+          const tr = officePlantAt(
             e.clientX - rect.left, e.clientY - rect.top,
             canvas.clientWidth, canvas.clientHeight,
-            selfRef.current, worldRef.current.dispP,
+            selfRef.current, plantsRef.current,
           );
           e.currentTarget.style.cursor = tr ? "pointer" : "default";
           onPickPlant(tr ? tr.species : null, e.clientX, e.clientY);

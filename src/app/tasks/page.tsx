@@ -15,9 +15,12 @@ import {
   updateTaskStatus,
   STATUS_META,
   STATUS_ORDER,
+  PRIORITY_META,
+  PRIORITY_ORDER,
   type Task,
   type TaskEdit,
   type TaskStatus,
+  type TaskPriority,
 } from "@/lib/tasks";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
@@ -78,7 +81,7 @@ function filterBySearch(pool: Task[], query: string): Task[] {
   return pool.filter((t) => keep.has(t.id));
 }
 
-type SortKey = "default" | "due" | "assignee" | "status";
+type SortKey = "default" | "due" | "assignee" | "status" | "priority";
 
 // A single task row. Shows the task, an inline status select, and a toggleable
 // comment thread.
@@ -118,6 +121,7 @@ function TaskRow({
   const [eAssignee, setEAssignee] = useState(task.assignee ?? "");
   const [eDue, setEDue] = useState(task.due_date ?? "");
   const [eStatus, setEStatus] = useState<TaskStatus>(task.status);
+  const [ePriority, setEPriority] = useState<TaskPriority>(task.priority);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string>();
 
@@ -129,6 +133,7 @@ function TaskRow({
     setEAssignee(task.assignee ?? "");
     setEDue(task.due_date ?? "");
     setEStatus(task.status);
+    setEPriority(task.priority);
     setEditError(undefined);
     setEditing(true);
   }
@@ -146,6 +151,7 @@ function TaskRow({
         assignee: eAssignee,
         dueDate: eDue,
         status: eStatus,
+        priority: ePriority,
       });
       setEditing(false);
     } catch {
@@ -203,6 +209,11 @@ function TaskRow({
             )}
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+            <span
+              className={`rounded px-1.5 py-0.5 font-medium ${PRIORITY_META[task.priority].badgeClass}`}
+            >
+              {PRIORITY_META[task.priority].label}
+            </span>
             <span>
               {task.assignee || "担当者なし"} ・ {formatDue(task.due_date)}
             </span>
@@ -307,6 +318,20 @@ function TaskRow({
                   {STATUS_ORDER.map((s) => (
                     <option key={s} value={s}>
                       {STATUS_META[s].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">優先度</span>
+                <select
+                  value={ePriority}
+                  onChange={(e) => setEPriority(e.target.value as TaskPriority)}
+                  className={fieldClass}
+                >
+                  {PRIORITY_ORDER.map((p) => (
+                    <option key={p} value={p}>
+                      {PRIORITY_META[p].label}
                     </option>
                   ))}
                 </select>
@@ -468,6 +493,7 @@ export default function TasksPage() {
   const [dueDate, setDueDate] = useState("");
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [parentId, setParentId] = useState<string>("");
+  const [priority, setPriority] = useState<TaskPriority>("mid");
   const [saving, setSaving] = useState(false);
 
   // Filter / sort.
@@ -476,6 +502,7 @@ export default function TasksPage() {
   const [filterStatus, setFilterStatus] = useState<"" | TaskStatus | "open">(
     "",
   );
+  const [filterPriority, setFilterPriority] = useState<"" | TaskPriority>("");
   const [sortKey, setSortKey] = useState<SortKey>("default");
   // Free-text keyword search over task titles. Shared by both tabs.
   const [search, setSearch] = useState("");
@@ -558,7 +585,7 @@ export default function TasksPage() {
           setSaving(false);
           return;
         }
-        const shared = { assignee: assignee.trim(), dueDate, status };
+        const shared = { assignee: assignee.trim(), dueDate, status, priority };
         const created: Task[] = [];
         for (const group of groups) {
           const parent = await createTask({
@@ -586,6 +613,7 @@ export default function TasksPage() {
           assignee: assignee.trim(),
           dueDate,
           status,
+          priority,
           parentId: parentId || null,
         });
         setTasks((prev) => [...prev, created]);
@@ -795,6 +823,7 @@ export default function TasksPage() {
   const filtersActive =
     filterAssignee !== "" ||
     filterStatus !== "" ||
+    filterPriority !== "" ||
     sortKey !== "default" ||
     search.trim() !== "";
 
@@ -806,6 +835,8 @@ export default function TasksPage() {
       list = list.filter((t) => (t.assignee || "") === filterAssignee);
     if (filterStatus && filterStatus !== "open")
       list = list.filter((t) => t.status === filterStatus);
+    if (filterPriority)
+      list = list.filter((t) => t.priority === filterPriority);
     // Keyword search on the title (keeps a matched child's parent for context).
     list = filterBySearch(list, search);
     const comparators: Record<SortKey, (a: Task, b: Task) => number> = {
@@ -815,10 +846,12 @@ export default function TasksPage() {
       assignee: (a, b) => (a.assignee || "").localeCompare(b.assignee || ""),
       status: (a, b) =>
         STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
+      priority: (a, b) =>
+        PRIORITY_META[a.priority].order - PRIORITY_META[b.priority].order,
     };
     if (sortKey !== "default") list.sort(comparators[sortKey]);
     return list;
-  }, [openTasks, filterAssignee, filterStatus, sortKey, search]);
+  }, [openTasks, filterAssignee, filterStatus, filterPriority, sortKey, search]);
 
   const tree = useMemo(() => buildTaskTree(openTasks), [openTasks]);
   // Progress tracks the assignee filter: pick a person to see just their
@@ -1063,6 +1096,21 @@ export default function TasksPage() {
             ))}
           </select>
           <select
+            value={filterPriority}
+            onChange={(e) =>
+              setFilterPriority(e.target.value as "" | TaskPriority)
+            }
+            aria-label="優先度で絞り込み"
+            className={`${inputClass} max-w-[8rem] py-1.5`}
+          >
+            <option value="">優先度：すべて</option>
+            {PRIORITY_ORDER.map((p) => (
+              <option key={p} value={p}>
+                {PRIORITY_META[p].label}
+              </option>
+            ))}
+          </select>
+          <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             aria-label="並び替え"
@@ -1070,6 +1118,7 @@ export default function TasksPage() {
           >
             <option value="default">並び順：既定</option>
             <option value="due">期限が近い順</option>
+            <option value="priority">優先度が高い順</option>
             <option value="assignee">担当者順</option>
             <option value="status">状態順</option>
           </select>
@@ -1192,6 +1241,21 @@ export default function TasksPage() {
                 {STATUS_ORDER.map((s) => (
                   <option key={s} value={s}>
                     {STATUS_META[s].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-700">優先度</span>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                className={inputClass}
+              >
+                {PRIORITY_ORDER.map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_META[p].label}
                   </option>
                 ))}
               </select>

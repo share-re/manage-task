@@ -13,12 +13,26 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
   );
 }
 
+export type TaskPriority = "high" | "mid" | "low";
+
+// Valid priorities, highest first. A missing/unknown value is treated as "mid"
+// (未設定＝中) in normalizeTask so every task always has a concrete priority.
+const TASK_PRIORITIES = ["high", "mid", "low"] as const;
+
+export function isTaskPriority(value: unknown): value is TaskPriority {
+  return (
+    typeof value === "string" &&
+    (TASK_PRIORITIES as readonly string[]).includes(value)
+  );
+}
+
 export type Task = {
   id: string;
   title: string;
   assignee: string | null;
   due_date: string | null;
   status: TaskStatus;
+  priority: TaskPriority;
   parent_id: string | null;
   created_by: string | null;
   created_at: string;
@@ -46,10 +60,23 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   done: STATUS_META.done.label,
 };
 
+// Presentation + sort order for task priority. A DB null is treated as "mid"
+// (未設定＝中) via normalizeTask, so the UI always has a concrete value.
+export const PRIORITY_META: Record<
+  TaskPriority,
+  { label: string; badgeClass: string; order: number }
+> = {
+  high: { label: "高", badgeClass: "bg-red-100 text-red-700", order: 0 },
+  mid: { label: "中", badgeClass: "bg-amber-100 text-amber-700", order: 1 },
+  low: { label: "低", badgeClass: "bg-zinc-100 text-zinc-600", order: 2 },
+};
+
+export const PRIORITY_ORDER: TaskPriority[] = [...TASK_PRIORITIES];
+
 // Columns fetched from the DB. Listing them explicitly (instead of "*") means
 // the client-side Task type and the query never silently diverge.
 const TASK_COLUMNS =
-  "id, title, assignee, due_date, status, parent_id, created_by, created_at, completed_at";
+  "id, title, assignee, due_date, status, priority, parent_id, created_by, created_at, completed_at";
 
 // Normalize an untyped DB row into a Task. An unexpected status falls back to
 // "todo" so an unknown value can't break status-keyed UI (labels, colors).
@@ -60,6 +87,7 @@ function normalizeTask(row: Record<string, unknown>): Task {
     assignee: typeof row.assignee === "string" ? row.assignee : null,
     due_date: typeof row.due_date === "string" ? row.due_date : null,
     status: isTaskStatus(row.status) ? row.status : "todo",
+    priority: isTaskPriority(row.priority) ? row.priority : "mid",
     parent_id: typeof row.parent_id === "string" ? row.parent_id : null,
     created_by: typeof row.created_by === "string" ? row.created_by : null,
     created_at: typeof row.created_at === "string" ? row.created_at : "",
@@ -83,6 +111,7 @@ export type NewTask = {
   assignee?: string;
   dueDate?: string;
   status: TaskStatus;
+  priority?: TaskPriority;
   parentId?: string | null;
 };
 
@@ -95,6 +124,7 @@ export async function createTask(input: NewTask): Promise<Task> {
       assignee: input.assignee || null,
       due_date: input.dueDate || null,
       status: input.status,
+      priority: input.priority ?? "mid",
       parent_id: input.parentId ?? null,
       completed_at: input.status === "done" ? new Date().toISOString() : null,
     })
@@ -112,6 +142,7 @@ export async function createTasks(inputs: NewTask[]): Promise<Task[]> {
     assignee: input.assignee || null,
     due_date: input.dueDate || null,
     status: input.status,
+    priority: input.priority ?? "mid",
     parent_id: input.parentId ?? null,
     completed_at: input.status === "done" ? now : null,
   }));
@@ -176,6 +207,7 @@ export type TaskEdit = {
   assignee?: string;
   dueDate?: string;
   status: TaskStatus;
+  priority?: TaskPriority;
 };
 
 /**
@@ -191,6 +223,7 @@ export async function updateTask(id: string, edit: TaskEdit): Promise<Task> {
       assignee: edit.assignee?.trim() || null,
       due_date: edit.dueDate || null,
       status: edit.status,
+      priority: edit.priority ?? "mid",
       completed_at: edit.status === "done" ? new Date().toISOString() : null,
     })
     .eq("id", id)

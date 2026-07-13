@@ -40,6 +40,8 @@ export default function AssistantPage() {
   const [loading, setLoading] = useState(false); // 返答待ちかどうか
   const [error, setError] = useState<string>(); // エラー文言
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null); // コピー済みの吹き出し
+  // 賢さモード。ON のとき、次からの送信を上位モデル(Flash)で行う（チャット欄外のトグルで切替）。
+  const [smartMode, setSmartMode] = useState(false);
   const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
 
   // 自動スクロール用。ユーザーが上に遡っているときは追従しない。
@@ -112,12 +114,13 @@ export default function AssistantPage() {
     </button>
   );
 
-  // 送信本体（送信ボタン・Enterキー・「賢く答え直して」から呼ぶ）。
+  // 送信本体（送信ボタン・Enterキー・「考え直して」から呼ぶ）。
   // retryText を渡すと「再送信」＝新しい吹き出しを足さず、直前のAI返答を捨てて同じ質問を送り直す。
-  // useSmartModel=true のときだけ上位モデル(Flash)を使う。
+  // useSmartModel=true のときだけ上位モデル(Flash)を使う（省略時は画面の賢さモードに従う）。
   async function send(opts?: { retryText?: string; useSmartModel?: boolean }) {
     const isRetry = opts?.retryText !== undefined;
-    const useSmartModel = opts?.useSmartModel ?? false;
+    // opts で明示されなければ、いまの賢さモードに従う。
+    const useSmartModel = opts?.useSmartModel ?? smartMode;
     const text = (opts?.retryText ?? input).trim();
     if (!text || loading) return; // 空・返答待ちのときは何もしない
 
@@ -270,12 +273,12 @@ export default function AssistantPage() {
     abortRef.current?.abort();
   }
 
-  // 「賢く答え直して」：直前の質問を、上位モデル(Flash)で送り直す。
-  function retryWithSmart() {
+  // 「考え直して」：直前の質問を、いまの賢さモードのまま送り直す。
+  function retry() {
     if (loading) return;
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
-    send({ retryText: lastUser.text, useSmartModel: true });
+    send({ retryText: lastUser.text }); // useSmartModel は省略＝現在のモードに従う
   }
 
   // textarea のキー操作：Shift+Enterで送信、Enterは改行（そのまま）。
@@ -579,15 +582,15 @@ export default function AssistantPage() {
               )}
               {/* コピー ボタン（アイコン） */}
               {copyButton(m.text, i)}
-              {/* 直前のAI返答にだけ「賢く答え直して」を出す（生成中は隠す）。 */}
+              {/* 直前のAI返答にだけ「考え直して」を出す（生成中は隠す）。いまの賢さモードで送り直す。 */}
               {i === messages.length - 1 && !loading && (
                 <button
                   type="button"
-                  onClick={retryWithSmart}
-                  title="上位モデル(Flash)で答え直します"
+                  onClick={retry}
+                  title="同じ質問を、いまのモードで答え直します"
                   className="mt-1 rounded-full px-2 py-0.5 text-xs text-emerald-700 ring-1 ring-emerald-600/30 transition hover:bg-emerald-50"
                 >
-                  🧠 賢く答え直して
+                  🔄 考え直して
                 </button>
               )}
             </div>
@@ -607,13 +610,38 @@ export default function AssistantPage() {
       {/* エラー表示 */}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
+      {/* 賢さモードの切り替え（チャット欄の外）。ONにすると次からの送信を賢いモデル(Flash)で行う。
+          先にONにしておけば、ふつうの返答を1回はさまずに、最初から賢く答えてもらえる。 */}
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <span className="text-xs text-emerald-800/70">
+          {smartMode
+            ? "賢くモード：しっかり考える（無料枠を多めに使います）"
+            : "ふつうモード：軽快に答える"}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={smartMode}
+          onClick={() => setSmartMode((v) => !v)}
+          title="ONにすると、次からの返答を上位モデル(Flash)で考えます（無料枠を多めに使います）"
+          className={
+            "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ring-1 transition " +
+            (smartMode
+              ? "bg-emerald-600 text-white ring-emerald-600"
+              : "bg-white/70 text-emerald-700 ring-emerald-600/30 hover:bg-white")
+          }
+        >
+          🧠 賢く {smartMode ? "ON" : "OFF"}
+        </button>
+      </div>
+
       {/* 入力欄（Enterで送信 / Shift+Enterで改行） */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
           send();
         }}
-        className="mt-3 flex items-end gap-2"
+        className="mt-2 flex items-end gap-2"
       >
         <textarea
           value={input}

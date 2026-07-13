@@ -565,7 +565,18 @@ export default function AssistantPage() {
             <div key={i} className="flex flex-col items-start">
               {/* Markdownを描画（生HTMLは描画しないので安全）。要素ごとの見た目はTailwindで指定。 */}
               <div className="max-w-[80%] rounded-2xl bg-white/90 px-4 py-2 text-sm text-zinc-900 shadow-sm ring-1 ring-black/5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-200/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-bold [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-100 [&_pre]:p-3 [&_pre]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-bold [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5">
-                <Markdown remarkPlugins={[remarkGfm]}>{m.text}</Markdown>
+                <Markdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    // 本文中のリンクは新しいタブで開く。
+                    // クリックでこのページから離脱すると、保存していない会話が消えてしまうため。
+                    a({ node, ...props }) {
+                      return <a {...props} target="_blank" rel="noreferrer" />;
+                    },
+                  }}
+                >
+                  {m.text}
+                </Markdown>
               </div>
               {/* 検索を使ったときの「参照元（出典）」。無いときは表示しない。 */}
               {m.sources && m.sources.length > 0 && (

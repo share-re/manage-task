@@ -41,11 +41,12 @@ function splitAcc(acc: string): { textPart: string; metaRaw: string } {
 const MAX_INPUT_HEIGHT = 128;
 
 export default function AssistantPage() {
-  const { session } = useAuth();
-  // ログイン中の名前。表示名が無ければメールの@より前を名前代わりに使う。
+  const { session, profileName } = useAuth();
+  // ログイン中の名前。profiles.name を正とし、無ければ表示名→メールの@より前。
   const metaName = session?.user.user_metadata?.name as string | undefined;
   const email = session?.user.email;
-  const userName = metaName ?? (email ? email.split("@")[0] : "");
+  const userName =
+    profileName?.trim() || metaName?.trim() || (email ? email.split("@")[0] : "");
 
   const [messages, setMessages] = useState<Msg[]>([]); // これまでの会話
   const [input, setInput] = useState(""); // 入力欄の文字

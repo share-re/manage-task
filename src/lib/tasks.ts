@@ -29,7 +29,8 @@ export function isTaskPriority(value: unknown): value is TaskPriority {
 export type Task = {
   id: string;
   title: string;
-  assignee: string | null;
+  assignee: string | null; // legacy: display-name string (fallback while migrating)
+  assignee_id: string | null; // new: profiles.id — source of truth for the assignee
   due_date: string | null;
   status: TaskStatus;
   priority: TaskPriority;
@@ -76,7 +77,7 @@ export const PRIORITY_ORDER: TaskPriority[] = [...TASK_PRIORITIES];
 // Columns fetched from the DB. Listing them explicitly (instead of "*") means
 // the client-side Task type and the query never silently diverge.
 const TASK_COLUMNS =
-  "id, title, assignee, due_date, status, priority, parent_id, created_by, created_at, completed_at";
+  "id, title, assignee, assignee_id, due_date, status, priority, parent_id, created_by, created_at, completed_at";
 
 // Normalize an untyped DB row into a Task. An unexpected status falls back to
 // "todo" so an unknown value can't break status-keyed UI (labels, colors).
@@ -85,6 +86,7 @@ function normalizeTask(row: Record<string, unknown>): Task {
     id: String(row.id),
     title: typeof row.title === "string" ? row.title : "",
     assignee: typeof row.assignee === "string" ? row.assignee : null,
+    assignee_id: typeof row.assignee_id === "string" ? row.assignee_id : null,
     due_date: typeof row.due_date === "string" ? row.due_date : null,
     status: isTaskStatus(row.status) ? row.status : "todo",
     priority: isTaskPriority(row.priority) ? row.priority : "mid",
@@ -109,6 +111,7 @@ export async function listTasks(): Promise<Task[]> {
 export type NewTask = {
   title: string;
   assignee?: string;
+  assigneeId?: string | null; // profiles.id of the assignee (preferred)
   dueDate?: string;
   status: TaskStatus;
   priority?: TaskPriority;
@@ -122,6 +125,7 @@ export async function createTask(input: NewTask): Promise<Task> {
     .insert({
       title: input.title,
       assignee: input.assignee || null,
+      assignee_id: input.assigneeId ?? null,
       due_date: input.dueDate || null,
       status: input.status,
       priority: input.priority ?? "mid",
@@ -140,6 +144,7 @@ export async function createTasks(inputs: NewTask[]): Promise<Task[]> {
   const rows = inputs.map((input) => ({
     title: input.title,
     assignee: input.assignee || null,
+    assignee_id: input.assigneeId ?? null,
     due_date: input.dueDate || null,
     status: input.status,
     priority: input.priority ?? "mid",
@@ -205,6 +210,7 @@ export async function updateTaskStatus(
 export type TaskEdit = {
   title: string;
   assignee?: string;
+  assigneeId?: string | null; // profiles.id of the assignee (preferred)
   dueDate?: string;
   status: TaskStatus;
   priority?: TaskPriority;
@@ -221,6 +227,7 @@ export async function updateTask(id: string, edit: TaskEdit): Promise<Task> {
     .update({
       title: edit.title,
       assignee: edit.assignee?.trim() || null,
+      assignee_id: edit.assigneeId ?? null,
       due_date: edit.dueDate || null,
       status: edit.status,
       priority: edit.priority ?? "mid",
@@ -264,4 +271,18 @@ export function buildTaskTree(tasks: Task[]): TaskNode[] {
     task,
     children: childrenByParent.get(task.id) ?? [],
   }));
+}
+
+/**
+ * Resolve the display label for a task's assignee. Prefers assignee_id looked up
+ * in labelById (the current profiles.name, so name changes are reflected
+ * automatically); falls back to the legacy assignee string for rows not yet
+ * migrated. Returns null when there is no assignee (shown as "担当者なし").
+ */
+export function resolveAssigneeLabel(
+  task: { assignee_id: string | null; assignee: string | null },
+  labelById: Map<string, string>,
+): string | null {
+  if (task.assignee_id) return labelById.get(task.assignee_id) ?? null;
+  return task.assignee ?? null;
 }

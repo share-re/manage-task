@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
+import { isAdmin } from "@/lib/roles";
 import LogoutButton from "@/components/LogoutButton";
 import PasskeyRegisterButton from "@/components/PasskeyRegisterButton";
 import {
@@ -447,6 +448,24 @@ export default function OfficePage() {
               ))}
             </div>
           </div>
+          {isAdmin(session) && (
+            <div className="mt-2 flex flex-col items-stretch gap-1.5 border-t border-[rgba(120,90,60,0.15)] pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-[#3B6D11]">
+                  管理者メニュー
+                </span>
+                <span className="rounded bg-[#EAF3DE] px-1.5 py-0.5 text-[10px] font-semibold text-[#173404]">
+                  adminのみ
+                </span>
+              </div>
+              <Link
+                href="/admin/users"
+                className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-[#2f9e77] bg-[#EAF3DE] px-3 py-2 text-sm font-semibold text-[#173404] transition hover:bg-[#dcefce]"
+              >
+                ⚙ 管理
+              </Link>
+            </div>
+          )}
           <div className="mt-2 flex flex-col items-stretch gap-1.5 border-t border-[rgba(120,90,60,0.15)] pt-2">
             <PasskeyRegisterButton />
             <LogoutButton className="self-start rounded-lg px-2 py-1 text-[11px] font-semibold text-[#a08a76] hover:bg-black/5" />

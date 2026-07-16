@@ -6,7 +6,7 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/lib/tasks.ts"],
+      include: ["src/lib/tasks.ts", "src/lib/roles.ts"],
     },
   },
 });

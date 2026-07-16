@@ -68,11 +68,14 @@ function colorFromId(id: string): string {
 }
 
 export default function OfficePage() {
-  const { session } = useAuth();
+  const { session, profileName, refreshProfileName } = useAuth();
   const userId = session?.user.id ?? "guest";
+  // Display name: profiles.name is the source of truth; fall back to
+  // user_metadata.name / email while it loads (NFR5).
   const playerName =
-    (session?.user.user_metadata?.name as string | undefined) ??
-    session?.user.email?.split("@")[0] ??
+    profileName?.trim() ||
+    (session?.user.user_metadata?.name as string | undefined)?.trim() ||
+    session?.user.email?.split("@")[0] ||
     "あなた";
   const playerColor = colorFromId(userId);
 
@@ -274,8 +277,9 @@ export default function OfficePage() {
     setNameError(undefined);
     setEditingName(true);
   }
-  // Save the display name to user_metadata; AuthProvider's USER_UPDATED event
-  // then refreshes the session so the new name flows everywhere (incl. presence).
+  // Save the display name. profiles.name is the source of truth (used by the
+  // assignee name everywhere); user_metadata is also updated for compatibility.
+  // refreshProfileName() then flows the new name to all screens via AuthProvider.
   async function saveName() {
     const next = nameDraft.trim();
     if (!next) { setNameError("名前を入力してください。"); return; }
@@ -283,9 +287,14 @@ export default function OfficePage() {
     if (next === playerName) { setEditingName(false); return; }
     setSavingName(true);
     setNameError(undefined);
-    const { error } = await supabase.auth.updateUser({ data: { name: next } });
+    const uid = session?.user.id;
+    const { error: e1 } = await supabase.auth.updateUser({ data: { name: next } });
+    const { error: e2 } = uid
+      ? await supabase.from("profiles").upsert({ id: uid, name: next })
+      : { error: null };
     setSavingName(false);
-    if (error) { setNameError("変更に失敗しました。時間をおいて再度お試しください。"); return; }
+    if (e1 || e2) { setNameError("変更に失敗しました。時間をおいて再度お試しください。"); return; }
+    refreshProfileName();
     setEditingName(false);
   }
 

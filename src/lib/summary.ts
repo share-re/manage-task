@@ -1,4 +1,9 @@
-import { STATUS_LABELS, taskProgress, type Task } from "./tasks";
+import {
+  resolveAssigneeLabel,
+  STATUS_LABELS,
+  taskProgress,
+  type Task,
+} from "./tasks";
 
 export type Summary = { subject: string; text: string; html: string };
 
@@ -20,10 +25,6 @@ function mmdd(due: string): string {
   return due.slice(5).replaceAll("-", "/");
 }
 
-function assigneeName(a: string | null): string {
-  return a && a.trim() ? a.trim() : "担当者なし";
-}
-
 function isAfter(iso: string | null, since: string): boolean {
   return !!iso && new Date(iso).getTime() > new Date(since).getTime();
 }
@@ -34,9 +35,16 @@ function isAfter(iso: string | null, since: string): boolean {
  */
 export function buildProgressSummary(
   tasks: Task[],
-  opts: { dateLabel: string; lastSentAt: string | null },
+  opts: {
+    dateLabel: string;
+    lastSentAt: string | null;
+    // profiles.id -> current display name, to resolve task.assignee_id.
+    labelById: Map<string, string>;
+  },
 ): Summary {
-  const { dateLabel, lastSentAt } = opts;
+  const { dateLabel, lastSentAt, labelById } = opts;
+  const assigneeLabel = (t: Task) =>
+    resolveAssigneeLabel(t, labelById) || "担当者なし";
   const todayMs = jstTodayMs();
   const { done, total, percent } = taskProgress(tasks);
 
@@ -51,7 +59,7 @@ export function buildProgressSummary(
         diff < 0 ? `${-diff}日超過` : diff === 0 ? "本日締切" : `あと${diff}日`;
       return {
         label,
-        line: `[${label}] ${t.title}   担当: ${assigneeName(t.assignee)}   期限 ${mmdd(t.due_date as string)}（${STATUS_LABELS[t.status]}）`,
+        line: `[${label}] ${t.title}   担当: ${assigneeLabel(t)}   期限 ${mmdd(t.due_date as string)}（${STATUS_LABELS[t.status]}）`,
       };
     });
 
@@ -66,7 +74,7 @@ export function buildProgressSummary(
   // --- Per-assignee progress ---
   const byAssignee = new Map<string, { total: number; done: number }>();
   for (const t of tasks) {
-    const key = assigneeName(t.assignee);
+    const key = assigneeLabel(t);
     const cur = byAssignee.get(key) ?? { total: 0, done: 0 };
     cur.total += 1;
     if (t.status === "done") cur.done += 1;
@@ -105,10 +113,10 @@ export function buildProgressSummary(
   } else {
     textLines.push(`   完了になった: ${completed.length}件`);
     for (const t of completed)
-      textLines.push(`      ・${t.title}（担当: ${assigneeName(t.assignee)}）`);
+      textLines.push(`      ・${t.title}（担当: ${assigneeLabel(t)}）`);
     textLines.push(`   新しく追加: ${added.length}件`);
     for (const t of added)
-      textLines.push(`      ・${t.title}（担当: ${assigneeName(t.assignee)}）`);
+      textLines.push(`      ・${t.title}（担当: ${assigneeLabel(t)}）`);
   }
   textLines.push("", "■ 担当者別の進捗");
   for (const [name, c] of assignees) {
@@ -138,9 +146,9 @@ export function buildProgressSummary(
   } else {
     changesHtml = `
       <p style="margin:4px 0;">✅ 完了になった: <strong>${completed.length}</strong>件</p>
-      <ul style="margin:0 0 8px;padding-left:20px;">${completed.map((t) => `<li>${esc(t.title)}（担当: ${esc(assigneeName(t.assignee))}）</li>`).join("")}</ul>
+      <ul style="margin:0 0 8px;padding-left:20px;">${completed.map((t) => `<li>${esc(t.title)}（担当: ${esc(assigneeLabel(t))}）</li>`).join("")}</ul>
       <p style="margin:4px 0;">＋ 新しく追加: <strong>${added.length}</strong>件</p>
-      <ul style="margin:0;padding-left:20px;">${added.map((t) => `<li>${esc(t.title)}（担当: ${esc(assigneeName(t.assignee))}）</li>`).join("")}</ul>`;
+      <ul style="margin:0;padding-left:20px;">${added.map((t) => `<li>${esc(t.title)}（担当: ${esc(assigneeLabel(t))}）</li>`).join("")}</ul>`;
   }
   const assigneeHtml = assignees
     .map(([name, c]) => {

@@ -10,6 +10,7 @@ import {
   deleteTasks,
   leafTasks,
   listTasks,
+  resolveAssigneeLabel,
   taskProgress,
   updateTask,
   updateTaskStatus,
@@ -96,7 +97,8 @@ function TaskRow({
   onToggleComments,
   onAddComment,
   onDelete,
-  memberOptions,
+  members,
+  labelById,
   onSave,
 }: {
   task: Task;
@@ -109,7 +111,8 @@ function TaskRow({
   onToggleComments: (id: string) => void;
   onAddComment: (taskId: string, body: string) => Promise<void>;
   onDelete: (task: Task) => void;
-  memberOptions: string[];
+  members: Member[];
+  labelById: Map<string, string>;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
@@ -118,7 +121,7 @@ function TaskRow({
   // Inline edit form state. Opened by the pencil button; seeded from the task.
   const [editing, setEditing] = useState(false);
   const [eTitle, setETitle] = useState(task.title);
-  const [eAssignee, setEAssignee] = useState(task.assignee ?? "");
+  const [eAssigneeId, setEAssigneeId] = useState(task.assignee_id ?? "");
   const [eDue, setEDue] = useState(task.due_date ?? "");
   const [eStatus, setEStatus] = useState<TaskStatus>(task.status);
   const [ePriority, setEPriority] = useState<TaskPriority>(task.priority);
@@ -130,7 +133,7 @@ function TaskRow({
 
   function startEdit() {
     setETitle(task.title);
-    setEAssignee(task.assignee ?? "");
+    setEAssigneeId(task.assignee_id ?? "");
     setEDue(task.due_date ?? "");
     setEStatus(task.status);
     setEPriority(task.priority);
@@ -148,7 +151,7 @@ function TaskRow({
     try {
       await onSave(task.id, {
         title,
-        assignee: eAssignee,
+        assigneeId: eAssigneeId || null,
         dueDate: eDue,
         status: eStatus,
         priority: ePriority,
@@ -215,7 +218,8 @@ function TaskRow({
               {PRIORITY_META[task.priority].label}
             </span>
             <span>
-              {task.assignee || "担当者なし"} ・ {formatDue(task.due_date)}
+              {resolveAssigneeLabel(task, labelById) || "担当者なし"} ・{" "}
+              {formatDue(task.due_date)}
             </span>
             {(() => {
               const badge = dueBadge(task);
@@ -284,17 +288,14 @@ function TaskRow({
                   担当者
                 </span>
                 <select
-                  value={eAssignee}
-                  onChange={(e) => setEAssignee(e.target.value)}
+                  value={eAssigneeId}
+                  onChange={(e) => setEAssigneeId(e.target.value)}
                   className={fieldClass}
                 >
                   <option value="">担当者なし</option>
-                  {(eAssignee && !memberOptions.includes(eAssignee)
-                    ? [eAssignee, ...memberOptions]
-                    : memberOptions
-                  ).map((m) => (
-                    <option key={m} value={m}>
-                      {m}
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {memberLabel(m)}
                     </option>
                   ))}
                 </select>
@@ -407,6 +408,7 @@ function ArchivedRow({
   expanded = false,
   onToggle,
   isChild = false,
+  labelById,
 }: {
   task: Task;
   onRestore: (task: Task) => void;
@@ -414,10 +416,11 @@ function ArchivedRow({
   expanded?: boolean;
   onToggle?: () => void;
   isChild?: boolean;
+  labelById: Map<string, string>;
 }) {
   const meta = (
     <p className="mt-0.5 text-xs text-zinc-400">
-      {task.assignee || "担当者なし"}
+      {resolveAssigneeLabel(task, labelById) || "担当者なし"}
       {task.completed_at ? ` ・ 完了 ${formatDateTime(task.completed_at)}` : ""}
     </p>
   );
@@ -465,8 +468,9 @@ function ArchivedRow({
 }
 
 export default function TasksPage() {
-  const { session } = useAuth();
+  const { session, profileName } = useAuth();
   const authorName =
+    profileName?.trim() ||
     ((session?.user.user_metadata?.name as string | undefined) || "").trim() ||
     session?.user.email ||
     null;
@@ -482,6 +486,12 @@ export default function TasksPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Registered users for the assignee picker (from the profiles table).
   const [members, setMembers] = useState<Member[]>([]);
+  // profiles.id -> current display label, used to render task.assignee_id.
+  const labelById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const mem of members) m.set(mem.id, memberLabel(mem));
+    return m;
+  }, [members]);
 
   // Registration form — collapsed by default, opened with the "+" button.
   const [showForm, setShowForm] = useState(false);
@@ -489,7 +499,7 @@ export default function TasksPage() {
   const [bulkMode, setBulkMode] = useState(false);
   const [title, setTitle] = useState("");
   const [bulkText, setBulkText] = useState("");
-  const [assignee, setAssignee] = useState("");
+  const [assigneeId, setAssigneeId] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [parentId, setParentId] = useState<string>("");
@@ -497,7 +507,7 @@ export default function TasksPage() {
   const [saving, setSaving] = useState(false);
 
   // Filter / sort.
-  const [filterAssignee, setFilterAssignee] = useState("");
+  const [filterAssigneeId, setFilterAssigneeId] = useState("");
   // "" = all, a status = that status, "open" = everything except done.
   const [filterStatus, setFilterStatus] = useState<"" | TaskStatus | "open">(
     "",
@@ -587,7 +597,7 @@ export default function TasksPage() {
           setSaving(false);
           return;
         }
-        const shared = { assignee: assignee.trim(), dueDate, status, priority };
+        const shared = { assigneeId: assigneeId || null, dueDate, status, priority };
         const created: Task[] = [];
         for (const group of groups) {
           const parent = await createTask({
@@ -612,7 +622,7 @@ export default function TasksPage() {
       } else {
         const created = await createTask({
           title: title.trim(),
-          assignee: assignee.trim(),
+          assigneeId: assigneeId || null,
           dueDate,
           status,
           priority,
@@ -622,7 +632,7 @@ export default function TasksPage() {
         setTitle("");
       }
       // Keep status/parent for quick repeated entry; clear the per-task fields.
-      setAssignee("");
+      setAssigneeId("");
       setDueDate("");
     } catch (err) {
       console.error(err);
@@ -784,21 +794,6 @@ export default function TasksPage() {
   const parentOptions = tasks.filter(
     (t) => !t.parent_id && t.status !== "done",
   );
-  const assigneeOptions = useMemo(
-    () =>
-      [...new Set(tasks.map((t) => t.assignee).filter(Boolean))] as string[],
-    [tasks],
-  );
-  // Assignee choices: registered users (profiles). Before profiles is
-  // populated, fall back to names already used on tasks plus the current user.
-  const memberOptions = useMemo(() => {
-    if (members.length > 0) return members.map(memberLabel);
-    const set = new Set<string>();
-    for (const t of tasks) if (t.assignee) set.add(t.assignee);
-    if (authorName) set.add(authorName);
-    return [...set];
-  }, [members, tasks, authorName]);
-
   // Split by completion: incomplete tasks feed the tree/list; completed ones
   // go to the archive tab (newest completion first).
   const openTasks = useMemo(
@@ -827,7 +822,7 @@ export default function TasksPage() {
   );
 
   const filtersActive =
-    filterAssignee !== "" ||
+    filterAssigneeId !== "" ||
     filterStatus !== "" ||
     filterPriority !== "" ||
     sortKey !== "default" ||
@@ -837,8 +832,8 @@ export default function TasksPage() {
   // arbitrary sort order). Otherwise show the 2-level tree.
   const flatList = useMemo(() => {
     let list = openTasks.slice();
-    if (filterAssignee)
-      list = list.filter((t) => (t.assignee || "") === filterAssignee);
+    if (filterAssigneeId)
+      list = list.filter((t) => t.assignee_id === filterAssigneeId);
     if (filterStatus && filterStatus !== "open")
       list = list.filter((t) => t.status === filterStatus);
     if (filterPriority)
@@ -849,7 +844,10 @@ export default function TasksPage() {
       default: () => 0,
       due: (a, b) =>
         (a.due_date || "9999-99-99").localeCompare(b.due_date || "9999-99-99"),
-      assignee: (a, b) => (a.assignee || "").localeCompare(b.assignee || ""),
+      assignee: (a, b) =>
+        (resolveAssigneeLabel(a, labelById) || "").localeCompare(
+          resolveAssigneeLabel(b, labelById) || "",
+        ),
       status: (a, b) =>
         STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
       priority: (a, b) =>
@@ -857,7 +855,15 @@ export default function TasksPage() {
     };
     if (sortKey !== "default") list.sort(comparators[sortKey]);
     return list;
-  }, [openTasks, filterAssignee, filterStatus, filterPriority, sortKey, search]);
+  }, [
+    openTasks,
+    filterAssigneeId,
+    filterStatus,
+    filterPriority,
+    sortKey,
+    search,
+    labelById,
+  ]);
 
   const tree = useMemo(() => buildTaskTree(openTasks), [openTasks]);
   // Progress tracks the assignee filter: pick a person to see just their
@@ -866,12 +872,12 @@ export default function TasksPage() {
   // Progress is counted over LEAF tasks (child + standalone tasks), excluding
   // parents that only group children — see leafTasks() for why.
   const leaves = useMemo(() => leafTasks(tasks), [tasks]);
-  const progressScope = filterAssignee
-    ? leaves.filter((t) => (t.assignee || "") === filterAssignee)
+  const progressScope = filterAssigneeId
+    ? leaves.filter((t) => t.assignee_id === filterAssigneeId)
     : leaves;
   const progress = taskProgress(progressScope);
-  const progressLabel = filterAssignee
-    ? `${filterAssignee} の進捗`
+  const progressLabel = filterAssigneeId
+    ? `${labelById.get(filterAssigneeId) ?? "担当者"} の進捗`
     : "チーム全体の進捗";
 
   // At-a-glance risk across all incomplete tasks (team-wide; intentionally
@@ -883,7 +889,7 @@ export default function TasksPage() {
     let unassigned = 0;
     for (const t of tasks) {
       if (t.status === "done") continue;
-      if (!t.assignee) unassigned++;
+      if (!t.assignee_id && !t.assignee) unassigned++;
       if (t.due_date) {
         const diff = dueDiffDays(t.due_date);
         if (diff < 0) overdue++;
@@ -909,7 +915,8 @@ export default function TasksPage() {
       onToggleComments={toggleComments}
       onAddComment={handleAddComment}
       onDelete={handleDelete}
-      memberOptions={memberOptions}
+      members={members}
+      labelById={labelById}
       onSave={handleUpdate}
     />
   );
@@ -1074,15 +1081,15 @@ export default function TasksPage() {
 
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <select
-            value={filterAssignee}
-            onChange={(e) => setFilterAssignee(e.target.value)}
+            value={filterAssigneeId}
+            onChange={(e) => setFilterAssigneeId(e.target.value)}
             aria-label="担当者で絞り込み"
             className={`${inputClass} max-w-[8rem] py-1.5`}
           >
             <option value="">担当者：すべて</option>
-            {assigneeOptions.map((a) => (
-              <option key={a} value={a}>
-                {a}
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {memberLabel(m)}
               </option>
             ))}
           </select>
@@ -1213,14 +1220,14 @@ export default function TasksPage() {
             <label className="flex flex-1 flex-col gap-1">
               <span className="text-sm font-medium text-zinc-700">担当者</span>
               <select
-                value={assignee}
-                onChange={(e) => setAssignee(e.target.value)}
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
                 className={inputClass}
               >
                 <option value="">担当者なし</option>
-                {memberOptions.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {memberLabel(m)}
                   </option>
                 ))}
               </select>
@@ -1312,6 +1319,7 @@ export default function TasksPage() {
                   <ArchivedRow
                     task={parent}
                     onRestore={handleRestore}
+                    labelById={labelById}
                     childCount={children.length}
                     expanded={expandedArchive.has(parent.id)}
                     onToggle={
@@ -1327,6 +1335,7 @@ export default function TasksPage() {
                           <ArchivedRow
                             task={child}
                             onRestore={handleRestore}
+                            labelById={labelById}
                             isChild
                           />
                         </li>

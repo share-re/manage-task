@@ -125,11 +125,25 @@ async function runSend(opts: {
     );
   }
 
+  // Resolve assignee display names (profiles.id -> current name) for the summary.
+  const { data: profiles } = await supabaseAdmin
+    .from("profiles")
+    .select("id, name, email");
+  const labelById = new Map<string, string>();
+  for (const p of profiles ?? []) {
+    const label =
+      (typeof p.name === "string" && p.name.trim()) ||
+      (typeof p.email === "string" ? p.email : "") ||
+      "名前未設定";
+    labelById.set(p.id as string, label);
+  }
+
   const jl = nowJst();
   const dateLabel = `${jl.getUTCFullYear()}/${jl.getUTCMonth() + 1}/${jl.getUTCDate()}`;
   const summary = buildProgressSummary((tasks ?? []) as Task[], {
     dateLabel,
     lastSentAt: settings?.last_sent_at ?? null,
+    labelById,
   });
 
   // Record every attempt in the send history (best-effort; never blocks send).

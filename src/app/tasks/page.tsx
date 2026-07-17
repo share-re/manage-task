@@ -26,6 +26,7 @@ import {
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
+import ForestBackground from "@/components/ForestBackground";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
@@ -925,7 +926,10 @@ export default function TasksPage() {
     "rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200";
 
   return (
-    <div className="flex-1" style={{ background: "#EAF3FB" }}>
+    // AI内田さん（/assistant）と同じ背景を使うため、常にライト表示に固定する。
+    <div className="relative flex-1" style={{ colorScheme: "light" }}>
+      {/* 植林（/forest）トーンの背景。AI内田さん（/assistant）と共通のコンポーネント。 */}
+      <ForestBackground />
       <main className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>

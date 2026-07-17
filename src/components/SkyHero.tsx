@@ -1,18 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSkyPhase, type SkyPhase } from "@/lib/skyPhase";
 
 // How many trees make a "full forest" in the hero.
 const TOTAL_TREES = 6;
-
-type SkyPhase = "dawn" | "day" | "dusk" | "night";
-
-function phaseFromHour(h: number): SkyPhase {
-  if (h >= 5 && h < 8) return "dawn";
-  if (h >= 8 && h < 17) return "day";
-  if (h >= 17 && h < 19) return "dusk";
-  return "night";
-}
 
 // Soft, muted palette per time of day (kept restrained on purpose).
 const SKY: Record<
@@ -60,16 +51,7 @@ export default function SkyHero({
   percent: number;
   label: string;
 }) {
-  // Start on "day" for a stable SSR render, then switch to the real time of
-  // day on the client (avoids a hydration mismatch).
-  const [phase, setPhase] = useState<SkyPhase>("day");
-  useEffect(() => {
-    const apply = () => setPhase(phaseFromHour(new Date().getHours()));
-    apply();
-    const id = setInterval(apply, 60_000);
-    return () => clearInterval(id);
-  }, []);
-
+  const phase = useSkyPhase();
   const sky = SKY[phase];
   const remaining = Math.max(0, TOTAL_TREES - done);
 

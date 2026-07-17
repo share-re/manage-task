@@ -134,7 +134,7 @@ export default function MailSettingsPage() {
       .finally(() => setLoaded(true));
 
     // Load recent send history (optional; missing table shouldn't break the page).
-    listSendLog(10)
+    listSendLog(50)
       .then(setLogs)
       .catch((err) => console.error("送信履歴の読み込みに失敗:", err));
   }, []);
@@ -385,7 +385,7 @@ export default function MailSettingsPage() {
               まだ送信履歴はありません。
             </p>
           ) : (
-            <ul className="mt-3 flex flex-col divide-y divide-zinc-100">
+            <ul className="mt-3 flex max-h-80 flex-col divide-y divide-zinc-100 overflow-y-auto">
               {logs.map((log) => (
                 <li
                   key={log.id}

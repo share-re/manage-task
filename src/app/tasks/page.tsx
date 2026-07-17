@@ -1422,31 +1422,34 @@ export default function TasksPage() {
           onClick={() => setDeleteTarget(null)}
         >
           <div
-            className="flex w-full max-w-xs flex-col gap-3 rounded-2xl bg-white px-6 py-5 shadow-xl"
+            className="flex w-full max-w-xs flex-col items-center gap-3 rounded-2xl bg-white px-8 py-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-2xl font-bold text-red-600">
+              !
+            </div>
             <p className="text-base font-medium text-zinc-900">
               タスクを削除しますか？
             </p>
-            <p className="text-sm text-zinc-600">
+            <p className="text-center text-sm text-zinc-600">
               「{deleteTarget.title}」を削除します。
               {tasks.filter((t) => t.parent_id === deleteTarget.id).length >
                 0 &&
                 `ぶら下がる子タスク${tasks.filter((t) => t.parent_id === deleteTarget.id).length}件も一緒に削除されます。`}
               この操作は取り消せません。
             </p>
-            <div className="mt-1 flex justify-end gap-2">
+            <div className="mt-1 flex justify-center gap-2">
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="rounded-lg border border-zinc-300 px-4 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
+                className="rounded-lg border border-zinc-300 px-5 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
               >
                 キャンセル
               </button>
               <button
                 type="button"
                 onClick={confirmDelete}
-                className="rounded-lg bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-500"
+                className="rounded-lg bg-red-600 px-5 py-1.5 text-sm font-medium text-white hover:bg-red-500"
               >
                 削除する
               </button>

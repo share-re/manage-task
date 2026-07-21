@@ -41,15 +41,19 @@ describe("difficultyFromEstimate（見積り→難易度の自動判定）", () 
     expect(difficultyFromEstimate(3.99)).toBe("small");
   });
 
-  it("4〜16時間は中（下端は中、上端は大）", () => {
+  it("4〜8時間は中（下端は中、上端は大）", () => {
     expect(difficultyFromEstimate(4)).toBe("mid");
-    expect(difficultyFromEstimate(15.5)).toBe("mid");
-    expect(difficultyFromEstimate(15.99)).toBe("mid");
+    expect(difficultyFromEstimate(7.99)).toBe("mid");
   });
 
-  it("16時間以上は大", () => {
-    expect(difficultyFromEstimate(16)).toBe("large");
-    expect(difficultyFromEstimate(40)).toBe("large");
+  it("8〜16時間は大（下端は大、上端は特大）", () => {
+    expect(difficultyFromEstimate(8)).toBe("large");
+    expect(difficultyFromEstimate(15.99)).toBe("large");
+  });
+
+  it("16時間以上は特大", () => {
+    expect(difficultyFromEstimate(16)).toBe("xlarge");
+    expect(difficultyFromEstimate(40)).toBe("xlarge");
   });
 });
 

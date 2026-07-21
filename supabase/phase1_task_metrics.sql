@@ -30,7 +30,7 @@ alter table public.tasks
   );
 
 -- 2) 見積工数（着手前の中立な予想・時間）。任意入力。0 以上のみ。
---    この数字から難易度（小<4h / 中4〜16h / 大>=16h）をアプリ側で自動判定する。
+--    この数字から難易度（小<4h / 中4〜8h / 大8〜16h / 特大>=16h）をアプリ側で自動判定する。
 alter table public.tasks
   add column if not exists estimated_hours numeric(6, 2);
 

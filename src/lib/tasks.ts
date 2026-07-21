@@ -55,7 +55,7 @@ export function isTaskType(value: unknown): value is TaskType {
 
 // Difficulty is NOT stored in the DB — it is derived from estimated_hours (see
 // difficultyFromEstimate). Kept as its own type for labels and comparison.
-export type Difficulty = "small" | "mid" | "large";
+export type Difficulty = "small" | "mid" | "large" | "xlarge";
 
 export type Task = {
   id: string;
@@ -121,16 +121,19 @@ export const TASK_TYPE_META: Record<TaskType, { label: string }> = {
 
 export const TASK_TYPE_ORDER: TaskType[] = [...TASK_TYPES];
 
-// Labels for the derived difficulty (小 / 中 / 大).
+// Labels for the derived difficulty (小 / 中 / 大 / 特大).
 export const DIFFICULTY_META: Record<Difficulty, { label: string }> = {
   small: { label: "小" },
   mid: { label: "中" },
   large: { label: "大" },
+  xlarge: { label: "特大" },
 };
 
-// Difficulty thresholds (hours): small < 4h, mid 4–16h, large >= 16h.
+// Difficulty thresholds (hours), on an ~8h/day feel:
+// small <4h（半日未満）, mid 4–8h（〜1日）, large 8–16h（1〜2日）, xlarge >=16h（2日超）.
 const DIFFICULTY_MID_MIN_HOURS = 4;
-const DIFFICULTY_LARGE_MIN_HOURS = 16;
+const DIFFICULTY_LARGE_MIN_HOURS = 8;
+const DIFFICULTY_XLARGE_MIN_HOURS = 16;
 
 // Columns fetched from the DB. Listing them explicitly (instead of "*") means
 // the client-side Task type and the query never silently diverge.
@@ -383,9 +386,9 @@ export function resolveAssigneeLabel(
 // --- Phase 1 metrics (難易度の自動判定・成果ポイント・生産性・進捗率) ---
 
 /**
- * Derive difficulty from the estimated hours. small < 4h, mid 4–16h,
- * large >= 16h. Returns null when there is no (valid) estimate — the UI shows
- * "未設定" and the task is left out of same-difficulty comparisons.
+ * Derive difficulty from the estimated hours. small <4h, mid 4–8h,
+ * large 8–16h, xlarge >=16h. Returns null when there is no (valid) estimate —
+ * the UI shows "未設定" and the task is left out of same-difficulty comparisons.
  */
 export function difficultyFromEstimate(
   hours: number | null | undefined,
@@ -393,7 +396,8 @@ export function difficultyFromEstimate(
   if (hours == null || !Number.isFinite(hours) || hours < 0) return null;
   if (hours < DIFFICULTY_MID_MIN_HOURS) return "small";
   if (hours < DIFFICULTY_LARGE_MIN_HOURS) return "mid";
-  return "large";
+  if (hours < DIFFICULTY_XLARGE_MIN_HOURS) return "large";
+  return "xlarge";
 }
 
 /**

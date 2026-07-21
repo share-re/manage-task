@@ -290,6 +290,22 @@ export async function updateTaskStatus(
   if (error) throw error;
 }
 
+/** Mark a task done and record its actual hours in one update. */
+export async function completeTask(
+  id: string,
+  actualHours: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from("tasks")
+    .update({
+      status: "done",
+      completed_at: new Date().toISOString(),
+      actual_hours: actualHours,
+    })
+    .eq("id", id);
+  if (error) throw error;
+}
+
 export type TaskEdit = {
   title: string;
   assignee?: string;

@@ -16,23 +16,31 @@ export type QuotaInfo = {
 // 429でなければ null を返す。
 export function parseQuotaError(err: unknown): QuotaInfo | null {
   const status = (err as { status?: unknown })?.status;
-  const msg = String(err instanceof Error ? err.message : err);
+  const raw = String(err instanceof Error ? err.message : err);
+  // ストリーミング呼び出し(sendMessageStream)では、APIのエラーJSONが
+  // 「エスケープされた文字列」(\" の形)としてもう一段JSONに包まれて届く。
+  // そのままだと正規表現が当たらないので、先に \" → " に戻してから探す。
+  const msg = raw.replace(/\\"/g, '"');
   const is429 =
-    status === 429 || msg.includes('"code":429') || msg.includes("RESOURCE_EXHAUSTED");
+    status === 429 || /"code"\s*:\s*429/.test(msg) || msg.includes("RESOURCE_EXHAUSTED");
   if (!is429) return null;
 
   // SDKのエラー文字列にはAPIが返した生のJSONが含まれるので、そこから抜き出す。
-  // JSON全体のパースは形が安定しないため、必要な2項目だけ正規表現で拾う。
-  const quotaId =
-    /"quotaId"\s*:\s*"([^"]+)"/.exec(msg)?.[1] ??
-    /"quotaMetric"\s*:\s*"([^"]+)"/.exec(msg)?.[1] ??
-    "";
-  const delay = /"retryDelay"\s*:\s*"([\d.]+)s"/.exec(msg);
+  // JSON全体のパースは形が安定しないため、必要な項目だけ正規表現で拾う。
+  // 上限違反(violations)は複数並ぶことがある（例: 分と日を同時に超過）ので全部集める。
+  const quotaIds = [...msg.matchAll(/"quota(?:Id|Metric)"\s*:\s*"([^"]+)"/g)].map(
+    (m) => m[1],
+  );
+  const quotaId = quotaIds.join(", ");
+  // 待ち時間は RetryInfo の retryDelay を第一候補に、無ければ
+  // メッセージ本文の "Please retry in 25.07s" という文からも拾う（予備手段）。
+  const delay =
+    /"retryDelay"\s*:\s*"([\d.]+)s"/.exec(msg) ?? /retry in ([\d.]+)\s*s/i.exec(msg);
   const retryDelaySec = delay ? Math.ceil(Number(delay[1])) : null;
 
-  // "PerDay" を含むときだけ「1日の上限」。
+  // どれか1つでも "PerDay" を含めば「1日の上限」（分と日を同時に超えたら日次を優先）。
   // "PerMinute" 系や判別不能なものは、安全側に倒して「一時的」として扱う
   // （数十秒で直るものを「明日まで」と誤案内するほうが害が大きいため）。
-  const kind = /perday/i.test(quotaId) ? "daily" : "temporary";
+  const kind = quotaIds.some((q) => /perday/i.test(q)) ? "daily" : "temporary";
   return { kind, quotaId, retryDelaySec };
 }

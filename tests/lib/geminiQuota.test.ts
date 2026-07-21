@@ -72,6 +72,79 @@ describe("parseQuotaError", () => {
     expect(parseQuotaError(err)?.kind).toBe("temporary");
   });
 
+  it("ストリーミング経由の二重に包まれたエラー（エスケープ形式）でも判定できる", () => {
+    // sendMessageStream 経由では、APIのエラーJSONが「エスケープされた文字列」として
+    // もう一段JSONに包まれて届く（実際に観測した形式の再現）。
+    const innerJson = JSON.stringify(
+      {
+        error: {
+          code: 429,
+          message:
+            "You exceeded your current quota. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash-lite\nPlease retry in 25.074552488s.",
+          status: "RESOURCE_EXHAUSTED",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+              violations: [
+                {
+                  quotaMetric:
+                    "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+                  quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+                  quotaValue: "20",
+                },
+              ],
+            },
+            {
+              "@type": "type.googleapis.com/google.rpc.RetryInfo",
+              retryDelay: "25s",
+            },
+          ],
+        },
+      },
+      null,
+      2, // 実物と同じく整形あり（"code": 429 のようにコロンの後に空白が入る）
+    );
+    const err = new Error(
+      JSON.stringify({
+        error: { message: innerJson, code: 429, status: "Too Many Requests" },
+      }),
+    );
+    const info = parseQuotaError(err);
+    expect(info?.kind).toBe("daily");
+    expect(info?.quotaId).toContain("PerDay");
+    expect(info?.retryDelaySec).toBe(25);
+  });
+
+  it("分と日を同時に超過しているときは「日次」を優先する", () => {
+    const err = new Error(
+      JSON.stringify({
+        error: {
+          code: 429,
+          status: "RESOURCE_EXHAUSTED",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+              violations: [
+                { quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier" },
+                { quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    expect(parseQuotaError(err)?.kind).toBe("daily");
+  });
+
+  it("retryDelay が無くても本文の「retry in ○s」から待ち時間を拾える", () => {
+    const err = new Error(
+      '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Please retry in 14.2s."}}',
+    );
+    const info = parseQuotaError(err);
+    expect(info?.kind).toBe("temporary");
+    expect(info?.retryDelaySec).toBe(15); // 小数は切り上げ
+  });
+
   it("429 ではないエラーは null を返す", () => {
     expect(parseQuotaError(new Error("fetch failed"))).toBeNull();
     expect(parseQuotaError(new Error('{"error":{"code":500}}'))).toBeNull();

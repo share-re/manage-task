@@ -217,10 +217,17 @@ export default function OfficePage() {
   // so there is exactly one 内田さん reply per triggering message.
   async function triggerAi(userText: string, mention: boolean) {
     try {
+      // 本人証明（アクセストークン）をヘッダに載せる（#76）。
+      // 呼びかけ名はサーバ側が認証情報から解決する（profiles.name と同じ順序）。
+      const { data: authData } = await supabase.auth.getSession();
+      const token = authData.session?.access_token;
       const res = await fetch("/api/assistant", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText, history: [], userName: playerName }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: userText, history: [] }),
       });
       const ct = res.headers.get("Content-Type") ?? "";
       if (!res.ok || !res.body || !ct.startsWith("text/plain")) throw new Error("unavailable");

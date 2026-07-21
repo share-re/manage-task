@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "@/components/AuthProvider";
+import { supabase } from "@/lib/supabase";
 import ForestBackground from "@/components/ForestBackground";
 import UchidaIcon from "@/components/UchidaIcon";
 import {
@@ -47,12 +48,8 @@ const MAX_INPUT_HEIGHT = 128;
 const SPICY_WORDS = /辛い|激辛|唐辛子|カレー|スパイス|麻婆|キムチ|ハバネロ/;
 
 export default function AssistantPage() {
-  const { session, profileName } = useAuth();
-  // ログイン中の名前。profiles.name を正とし、無ければ表示名→メールの@より前。
-  const metaName = session?.user.user_metadata?.name as string | undefined;
-  const email = session?.user.email;
-  const userName =
-    profileName?.trim() || metaName?.trim() || (email ? email.split("@")[0] : "");
+  const { session } = useAuth();
+  // 呼びかけ名はサーバ側が認証情報から解決するため、ここでは組み立てない（#76 / KI-03）。
 
   const [messages, setMessages] = useState<Msg[]>([]); // これまでの会話
   const [input, setInput] = useState(""); // 入力欄の文字
@@ -206,10 +203,18 @@ export default function AssistantPage() {
     };
 
     try {
+      // 本人証明（アクセストークン）をヘッダに載せる（#76）。
+      // getSession は期限切れのトークンを自動で新しくしてくれる。
+      const { data: authData } = await supabase.auth.getSession();
+      const token = authData.session?.access_token;
+
       const res = await fetch("/api/assistant", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history, userName, useSmartModel }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: text, history, useSmartModel }),
         signal: controller.signal,
       });
 

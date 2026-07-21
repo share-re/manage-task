@@ -1,5 +1,6 @@
 import { GoogleGenAI, type GroundingMetadata } from "@google/genai";
 import { UCHIDA_SYSTEM_PROMPT } from "@/lib/uchidaPrompt";
+import { parseQuotaError } from "@/lib/geminiQuota";
 
 // このAPIはサーバ側で動かす（鍵をブラウザに出さないため）。
 // Edgeランタイムだと不具合が出やすいので Node を明示する。
@@ -23,15 +24,6 @@ function buildSourcesMeta(gm: GroundingMetadata | undefined) {
   const suggestions = gm.searchEntryPoint?.renderedContent ?? "";
   if (sources.length === 0 && !suggestions) return null;
   return { sources, suggestions };
-}
-
-// Geminiの「利用上限」エラー（HTTP 429 / RESOURCE_EXHAUSTED）かどうかを見分ける。
-// 無料枠の1日の上限に達したときはこれが投げられる。
-function isQuotaError(err: unknown): boolean {
-  const status = (err as { status?: unknown })?.status;
-  if (status === 429) return true;
-  const s = String(err instanceof Error ? err.message : err);
-  return s.includes("429") || s.includes("RESOURCE_EXHAUSTED") || s.includes("quota");
 }
 
 export async function POST(req: Request) {
@@ -144,13 +136,41 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     // ストリーム開始前のエラー（レート上限・鍵ミス等）はJSONで返す。
-    console.error("Gemini API error:", err);
-    // 無料枠の1日の上限（429）は、原因が分かるように専用の文言で返す。
-    if (isQuotaError(err)) {
+    // 原因調査のため、加工前の生のエラーを必ずそのままログに残す。
+    console.error("Gemini API error (raw):", err);
+    const quota = parseQuotaError(err);
+    if (quota) {
+      // 429の判定に使った材料もログに残す（どの上限に当たったかを後から追えるように）。
+      console.error("Gemini 429 detail:", {
+        kind: quota.kind,
+        quotaId: quota.quotaId || "(不明)",
+        retryDelaySec: quota.retryDelaySec,
+      });
+      // 「1日の上限(PerDay)」と確認できたときだけ、日次の文言を返す。
+      // 無料枠の上限はモデルごとに別カウントなので、もう一方のモードなら
+      // まだ使える場合があることを、失敗したモデルに合わせて案内する。
+      if (quota.kind === "daily") {
+        const switchHint = useSmartModel
+          ? "上限はモデルごとに別なので、「🧠 賢く」をOFFにすると、ふつうモードで続けられる場合があります。"
+          : "上限はモデルごとに別なので、「🧠 賢く」をONにすると、別のモデルで続けられる場合があります。";
+        return Response.json(
+          {
+            error:
+              `今日は${useSmartModel ? "賢くモード" : "ふつうモード"}のAIが利用上限に達しました（無料枠の1日あたりの上限。明日リセットされます）。` +
+              switchHint,
+            quota: "daily",
+          },
+          { status: 429 },
+        );
+      }
+      // 1分あたりの上限(RPM/TPM)や判別不能な429は「一時的」。
+      // 自動再試行はせず、文言を返してユーザーの判断に任せる。
+      // quota / retryAfterSec は機械可読な参考情報として添えておく（画面は文言のみ使用）。
       return Response.json(
         {
-          error:
-            "今日はAIの利用上限に達しました。明日また試してください。（無料枠の1日あたりの上限）",
+          error: "混雑しています。少し時間をおいてもう一度お試しください。",
+          quota: "temporary",
+          retryAfterSec: quota.retryDelaySec ?? 10,
         },
         { status: 429 },
       );

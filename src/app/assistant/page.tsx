@@ -92,10 +92,18 @@ export default function AssistantPage() {
     el.style.height = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT) + "px";
   }, [input]);
 
+  // 保存済みの会話一覧を取り直す（最近使った順）。
+  // ※すぐ下の useEffect から使うため、useEffect より前に宣言しておく（lintの規則）。
+  function refreshConversations() {
+    // 取得できたらコールバックで一覧を反映する（effect内で同期的にsetStateしない書き方）。
+    return listConversations()
+      .then(setConversations)
+      .catch((e) => console.error("会話一覧の取得に失敗:", e));
+  }
+
   // ログインできたら、保存済みの会話一覧を読み込む（履歴パネル用）。
   useEffect(() => {
     if (session) refreshConversations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   // 返答をクリップボードにコピー（HTTPS / localhost でのみ動く）。
@@ -206,7 +214,10 @@ export default function AssistantPage() {
       });
 
       if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
+        // 429（利用上限）もここに来る。サーバーが原因別の文言
+        // （1日の上限→「明日また」/ 一時的→「混雑しています」）を返すので、そのまま表示する。
+        // 自動再試行はしない。もう一度送るかどうかはユーザーに任せる。
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
         setError(data.error ?? "エラーが発生しました。");
         revert();
         return;
@@ -336,15 +347,6 @@ export default function AssistantPage() {
     abortRef.current?.abort();
   }
 
-  // 保存済みの会話一覧を取り直す（最近使った順）。
-  async function refreshConversations() {
-    try {
-      setConversations(await listConversations());
-    } catch (e) {
-      console.error("会話一覧の取得に失敗:", e);
-    }
-  }
-
   // 過去の会話を開いて、続きから表示する。
   async function openConversation(id: string) {
     try {
@@ -427,7 +429,9 @@ export default function AssistantPage() {
       {/* 左サイドバー：新しい会話＋履歴一覧。PCは常時表示、スマホは☰で開閉する引き出し。 */}
       <aside
         className={
-          "fixed inset-y-0 left-0 z-30 flex w-64 shrink-0 transform flex-col bg-white/95 shadow-lg ring-1 ring-black/5 backdrop-blur transition-transform md:static md:z-10 md:translate-x-0 md:shadow-none md:ring-0 " +
+          // md:h-[100dvh] で高さを画面ぴったりに固定し、あふれた分は中の履歴一覧だけがスクロールする
+          // （これが無いと履歴が増えたときに aside ごと伸びて、上下のボタンが画面外に出てしまう）。
+          "fixed inset-y-0 left-0 z-30 flex w-64 shrink-0 transform flex-col bg-white/95 shadow-lg ring-1 ring-black/5 backdrop-blur transition-transform md:static md:z-10 md:h-[100dvh] md:translate-x-0 md:shadow-none md:ring-0 " +
           (sidebarOpen ? "translate-x-0" : "-translate-x-full")
         }
       >
@@ -461,8 +465,8 @@ export default function AssistantPage() {
 
         <div className="px-3 pb-1 text-xs text-zinc-400">履歴</div>
 
-        {/* 会話一覧 */}
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
+        {/* 会話一覧（ここだけスクロール。min-h-0 が無いと中身につられて縮まずスクロールしない） */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {conversations.length === 0 ? (
             <p className="px-2 py-2 text-xs text-zinc-500">
               まだ保存された会話はありません。

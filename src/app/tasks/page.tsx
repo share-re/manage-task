@@ -23,8 +23,6 @@ import {
   TASK_TYPE_ORDER,
   DIFFICULTY_META,
   difficultyFromEstimate,
-  estimateAchievement,
-  productivity,
   type Task,
   type TaskEdit,
   type TaskStatus,
@@ -34,7 +32,6 @@ import {
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
-import FeatureProgress from "@/components/FeatureProgress";
 import ForestBackground from "@/components/ForestBackground";
 
 function formatDue(due: string | null): string {
@@ -812,6 +809,26 @@ export default function TasksPage() {
     }
   }
 
+  // When a parent is archived (done), cascade its incomplete children to done
+  // too (bulk archive of the whole feature). Children are archived without
+  // requiring actual hours — closing out a feature is an organizational action;
+  // children left without hours simply stay out of the metrics (NFR-09).
+  async function cascadeChildrenDone(parentId: string) {
+    const children = tasks.filter(
+      (t) => t.parent_id === parentId && t.status !== "done",
+    );
+    if (children.length === 0) return;
+    const nowIso = new Date().toISOString();
+    setTasks((ts) =>
+      ts.map((t) =>
+        t.parent_id === parentId && t.status !== "done"
+          ? { ...t, status: "done", completed_at: nowIso }
+          : t,
+      ),
+    );
+    await Promise.all(children.map((c) => updateTaskStatus(c.id, "done")));
+  }
+
   async function handleStatusChange(id: string, next: TaskStatus) {
     const task = tasks.find((t) => t.id === id);
     const isLeaf = !tasks.some((t) => t.parent_id === id);
@@ -828,6 +845,8 @@ export default function TasksPage() {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: next } : t)));
     try {
       await updateTaskStatus(id, next);
+      // Parent archived → cascade its children to the archive too.
+      if (next === "done" && !isLeaf) await cascadeChildrenDone(id);
       await syncParentAfterChange(id, next);
     } catch (err) {
       console.error(err);
@@ -881,6 +900,9 @@ export default function TasksPage() {
   async function handleUpdate(id: string, edit: TaskEdit) {
     const updated = await updateTask(id, edit);
     setTasks((ts) => ts.map((t) => (t.id === id ? updated : t)));
+    // Editing a parent to "done" also archives its children.
+    const isParent = tasks.some((t) => t.parent_id === id);
+    if (updated.status === "done" && isParent) await cascadeChildrenDone(id);
     setSavedModal(true);
   }
 
@@ -1055,10 +1077,6 @@ export default function TasksPage() {
   // Progress is counted over LEAF tasks (child + standalone tasks), excluding
   // parents that only group children — see leafTasks() for why.
   const leaves = useMemo(() => leafTasks(tasks), [tasks]);
-  // Supporting metrics (Q-02): achievement reads on its own (1.0 = on
-  // estimate); productivity is comparison-only and never judged standalone.
-  const achievement = useMemo(() => estimateAchievement(leaves), [leaves]);
-  const teamProductivity = useMemo(() => productivity(leaves), [leaves]);
   const progressScope = filterAssigneeId
     ? leaves.filter((t) => t.assignee_id === filterAssigneeId)
     : leaves;
@@ -1066,26 +1084,6 @@ export default function TasksPage() {
   const progressLabel = filterAssigneeId
     ? `${labelById.get(filterAssigneeId) ?? "担当者"} の進捗`
     : "チーム全体の進捗";
-
-  // At-a-glance risk across all incomplete tasks (team-wide; intentionally
-  // ignores the assignee filter — everyone should see what's at risk).
-  const riskSummary = useMemo(() => {
-    let overdue = 0;
-    let dueToday = 0;
-    let dueSoon = 0;
-    let unassigned = 0;
-    for (const t of tasks) {
-      if (t.status === "done") continue;
-      if (!t.assignee_id && !t.assignee) unassigned++;
-      if (t.due_date) {
-        const diff = dueDiffDays(t.due_date);
-        if (diff < 0) overdue++;
-        else if (diff === 0) dueToday++;
-        else if (diff <= 3) dueSoon++;
-      }
-    }
-    return { overdue, dueToday, dueSoon, unassigned };
-  }, [tasks]);
 
   // Sum of a parent's children actual hours (parent roll-up display, Q-04).
   const childActualSum = (parentId: string) =>
@@ -1119,6 +1117,10 @@ export default function TasksPage() {
 
   const inputClass =
     "rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200";
+  // Compact selects for the list-heading row: small enough that the four
+  // filters share ONE line with the heading (they shrink, never wrap).
+  const filterSelectClass =
+    "rounded-md border border-zinc-300 bg-white px-1.5 py-1 text-[11px] text-zinc-700 outline-none focus:border-zinc-500";
 
   return (
     // AI内田さん（/assistant）と同じ背景を使うため、常にライト表示に固定する。
@@ -1129,6 +1131,28 @@ export default function TasksPage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
         <div className="flex items-center gap-2">
+          <Link
+            href="/tasks/dashboard"
+            aria-label="ダッシュボード"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M3 3v18h18" />
+              <rect x="7" y="12" width="3" height="6" />
+              <rect x="12" y="8" width="3" height="10" />
+              <rect x="17" y="5" width="3" height="13" />
+            </svg>
+            ダッシュボード
+          </Link>
           <Link
             href="/tasks/mail"
             aria-label="メール共有の設定"
@@ -1181,141 +1205,9 @@ export default function TasksPage() {
         label={progressLabel}
       />
 
-      {/* Supporting metric cards: 見積り達成率 (reads standalone, 1.0 = on
-          estimate) and 生産性 (comparison-only; now accumulating the non-AI
-          baseline for phase 4). */}
-      <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="rounded-lg bg-white px-4 py-3 shadow-sm ring-1 ring-black/5">
-          <div className="text-[11px] text-zinc-500">見積り達成率</div>
-          {achievement ? (
-            <>
-              <div className="mt-0.5 flex items-baseline gap-2">
-                <span className="text-xl font-semibold text-zinc-900">
-                  {achievement.ratio.toFixed(2)}
-                </span>
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                    achievement.ratio >= 1
-                      ? "bg-green-100 text-green-700"
-                      : "bg-amber-100 text-amber-700"
-                  }`}
-                >
-                  {achievement.ratio >= 1
-                    ? `見積りより${Math.round((achievement.ratio - 1) * 100)}%速い`
-                    : `見積りより${Math.round((1 - achievement.ratio) * 100)}%多くかかった`}
-                </span>
-              </div>
-              <div className="mt-0.5 text-[11px] text-zinc-400">
-                基準1.0＝見積りどおり ・ 対象 {achievement.count}件（見積り入力済みの完了タスク）
-              </div>
-            </>
-          ) : (
-            <div className="mt-0.5 text-sm text-zinc-400">
-              未計測（見積り・実績がそろった完了タスクがまだありません）
-            </div>
-          )}
-        </div>
-        <div className="rounded-lg bg-white px-4 py-3 shadow-sm ring-1 ring-black/5">
-          <div className="text-[11px] text-zinc-500">生産性（補助）</div>
-          {teamProductivity != null ? (
-            <>
-              <div className="mt-0.5 flex items-baseline gap-2">
-                <span className="text-xl font-semibold text-zinc-900">
-                  {teamProductivity.toFixed(1)}
-                </span>
-                <span className="text-xs text-zinc-500">pt/時</span>
-              </div>
-              <div className="mt-0.5 text-[11px] text-zinc-400">
-                比較相手を蓄積中（非AIの基準値）・ 単体では評価しない
-              </div>
-            </>
-          ) : (
-            <div className="mt-0.5 text-sm text-zinc-400">
-              未計測（実績時間つきの完了タスクがまだありません）
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Risk summary — at-risk tasks at a glance (team-wide, incomplete only) */}
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {(
-          [
-            ["期限超過", riskSummary.overdue, "text-red-700"],
-            ["本日締切", riskSummary.dueToday, "text-red-700"],
-            ["期限間近", riskSummary.dueSoon, "text-amber-700"],
-            ["担当なし", riskSummary.unassigned, "text-zinc-600"],
-          ] as const
-        ).map(([label, n, cls]) => (
-          <div
-            key={label}
-            className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-black/5"
-          >
-            <div
-              className={`text-xl font-semibold ${n > 0 ? cls : "text-zinc-300"}`}
-            >
-              {n}
-            </div>
-            <div className="text-[11px] text-zinc-500">{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Per-feature progress with delay badges (要確認-5: the first cross
-          view). Feature = parent task. */}
-      <FeatureProgress tasks={tasks} labelById={labelById} />
-
-      {/* Sticky header: tabs + toolbar stay visible while the list scrolls. */}
-      <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-zinc-200 bg-zinc-50 px-4 pt-1">
-        <div className="flex gap-1">
-          {(
-            [
-              ["open", "未完了", openTasks.length],
-              ["archive", "アーカイブ", archivedTasks.length],
-            ] as const
-          ).map(([key, label, count]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={`flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-1 text-sm transition ${
-                tab === key
-                  ? "border-zinc-900 font-semibold text-zinc-900"
-                  : "border-transparent text-zinc-500 hover:text-zinc-700"
-              }`}
-            >
-              {label}
-              <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
-                {count}
-              </span>
-            </button>
-          ))}
-        </div>
-        {/* Keyword search — available on both tabs. */}
-        <div className="py-3">
-          <div className="relative">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="タスク名で検索"
-              aria-label="タスク名で検索"
-              className={`${inputClass} w-full py-1.5 pr-9 text-sm`}
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                aria-label="検索をクリア"
-                className="absolute inset-y-0 right-2 my-auto flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-              >
-                ×
-              </button>
-            )}
-          </div>
-        </div>
+      {/* Toolbar: add / delete-mode / filters (open tab only). */}
         {tab === "open" && (
-          <div className="flex flex-wrap items-center gap-2 pb-3">
+          <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setShowForm((v) => !v)}
@@ -1338,66 +1230,8 @@ export default function TasksPage() {
           🗑
         </button>
 
-        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
-          <select
-            value={filterAssigneeId}
-            onChange={(e) => setFilterAssigneeId(e.target.value)}
-            aria-label="担当者で絞り込み"
-            className={`${inputClass} max-w-[8rem] py-1.5`}
-          >
-            <option value="">担当者：すべて</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {memberLabel(m)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filterStatus}
-            onChange={(e) =>
-              setFilterStatus(e.target.value as "" | TaskStatus | "open")
-            }
-            aria-label="状態で絞り込み"
-            className={`${inputClass} max-w-[8rem] py-1.5`}
-          >
-            <option value="">状態：すべて</option>
-            {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
-              <option key={s} value={s}>
-                {STATUS_META[s].label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filterPriority}
-            onChange={(e) =>
-              setFilterPriority(e.target.value as "" | TaskPriority)
-            }
-            aria-label="優先度で絞り込み"
-            className={`${inputClass} max-w-[8rem] py-1.5`}
-          >
-            <option value="">優先度：すべて</option>
-            {PRIORITY_ORDER.map((p) => (
-              <option key={p} value={p}>
-                {PRIORITY_META[p].label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
-            aria-label="並び替え"
-            className={`${inputClass} max-w-[9rem] py-1.5`}
-          >
-            <option value="default">並び順：既定</option>
-            <option value="due">期限が近い順</option>
-            <option value="priority">優先度が高い順</option>
-            <option value="assignee">担当者順</option>
-            <option value="status">状態順</option>
-          </select>
-        </div>
           </div>
         )}
-      </div>
 
       {tab === "open" && (
         <>
@@ -1592,13 +1426,129 @@ export default function TasksPage() {
         </>
       )}
 
-      {/* Task list */}
-      <section>
-        <h2 className="mb-3 text-lg font-semibold text-zinc-800">
-          {tab === "archive"
-            ? `アーカイブ（${filteredArchive.length}）`
-            : `タスク一覧（${filtersActive ? flatList.length : openTasks.length}）`}
-        </h2>
+      {/* Task list card: tabs (card header) + search + filters + rows all on
+          one rounded white card, floating over the forest background. */}
+      <section className="rounded-2xl bg-white shadow-md ring-1 ring-black/5">
+        {/* Tabs + search, pinned to the top of the viewport while the list
+            scrolls (sticky, white so it blends with the card). */}
+        <div className="sticky top-0 z-20 rounded-t-2xl border-b border-zinc-200 bg-white px-5 pt-2">
+          <div className="flex gap-1">
+            {(
+              [
+                ["open", "未完了", openTasks.length],
+                ["archive", "アーカイブ", archivedTasks.length],
+              ] as const
+            ).map(([key, label, count]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-1 text-sm transition ${
+                  tab === key
+                    ? "border-zinc-900 font-semibold text-zinc-900"
+                    : "border-transparent text-zinc-500 hover:text-zinc-700"
+                }`}
+              >
+                {label}
+                <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+          {/* Keyword search — available on both tabs. */}
+          <div className="py-3">
+            <div className="relative">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="タスク名で検索"
+                aria-label="タスク名で検索"
+                className={`${inputClass} w-full py-1.5 pr-9 text-sm`}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="検索をクリア"
+                  className="absolute inset-y-0 right-2 my-auto flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 pb-5 pt-4">
+        {/* Heading + filters on ONE row (filters shrink instead of wrapping). */}
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="shrink-0 text-base font-semibold text-zinc-800">
+            {tab === "archive"
+              ? `アーカイブ（${filteredArchive.length}）`
+              : `タスク一覧（${filtersActive ? flatList.length : openTasks.length}）`}
+          </h2>
+          {tab === "open" && (
+            <div className="ml-auto flex min-w-0 shrink items-center gap-1.5">
+              <select
+                value={filterAssigneeId}
+                onChange={(e) => setFilterAssigneeId(e.target.value)}
+                aria-label="担当者で絞り込み"
+                className={`${filterSelectClass} max-w-[6.5rem]`}
+              >
+                <option value="">担当者：すべて</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {memberLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={filterStatus}
+                onChange={(e) =>
+                  setFilterStatus(e.target.value as "" | TaskStatus | "open")
+                }
+                aria-label="状態で絞り込み"
+                className={`${filterSelectClass} max-w-[6rem]`}
+              >
+                <option value="">状態：すべて</option>
+                {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_META[s].label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={filterPriority}
+                onChange={(e) =>
+                  setFilterPriority(e.target.value as "" | TaskPriority)
+                }
+                aria-label="優先度で絞り込み"
+                className={`${filterSelectClass} max-w-[6.5rem]`}
+              >
+                <option value="">優先度：すべて</option>
+                {PRIORITY_ORDER.map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_META[p].label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                aria-label="並び替え"
+                className={`${filterSelectClass} max-w-[7rem]`}
+              >
+                <option value="default">並び順：既定</option>
+                <option value="due">期限が近い順</option>
+                <option value="priority">優先度が高い順</option>
+                <option value="assignee">担当者順</option>
+                <option value="status">状態順</option>
+              </select>
+            </div>
+          )}
+        </div>
 
         {error && !showForm && (
           <p className="mb-3 text-sm text-red-600">{error}</p>
@@ -1685,6 +1635,7 @@ export default function TasksPage() {
             ))}
           </ul>
         )}
+        </div>
       </section>
 
       {/* Completion dialog: a leaf task requires its actual hours to be done. */}

@@ -147,11 +147,17 @@ export async function POST(req: Request) {
         retryDelaySec: quota.retryDelaySec,
       });
       // 「1日の上限(PerDay)」と確認できたときだけ、日次の文言を返す。
+      // 無料枠の上限はモデルごとに別カウントなので、もう一方のモードなら
+      // まだ使える場合があることを、失敗したモデルに合わせて案内する。
       if (quota.kind === "daily") {
+        const switchHint = useSmartModel
+          ? "上限はモデルごとに別なので、「🧠 賢く」をOFFにすると、ふつうモードで続けられる場合があります。"
+          : "上限はモデルごとに別なので、「🧠 賢く」をONにすると、別のモデルで続けられる場合があります。";
         return Response.json(
           {
             error:
-              "今日はAIの利用上限に達しました。明日また試してください。（無料枠の1日あたりの上限）",
+              `今日は${useSmartModel ? "賢くモード" : "ふつうモード"}のAIが利用上限に達しました（無料枠の1日あたりの上限。明日リセットされます）。` +
+              switchHint,
             quota: "daily",
           },
           { status: 429 },

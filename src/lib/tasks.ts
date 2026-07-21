@@ -26,6 +26,37 @@ export function isTaskPriority(value: unknown): value is TaskPriority {
   );
 }
 
+export type TaskType =
+  | "design"
+  | "implementation"
+  | "test"
+  | "research"
+  | "review"
+  | "documentation";
+
+// Valid task types. Matches the DB check constraint on tasks.task_type. English
+// codes are stored; Japanese labels live in TASK_TYPE_META (same pattern as
+// STATUS/PRIORITY).
+const TASK_TYPES = [
+  "design",
+  "implementation",
+  "test",
+  "research",
+  "review",
+  "documentation",
+] as const;
+
+export function isTaskType(value: unknown): value is TaskType {
+  return (
+    typeof value === "string" &&
+    (TASK_TYPES as readonly string[]).includes(value)
+  );
+}
+
+// Difficulty is NOT stored in the DB — it is derived from estimated_hours (see
+// difficultyFromEstimate). Kept as its own type for labels and comparison.
+export type Difficulty = "small" | "mid" | "large";
+
 export type Task = {
   id: string;
   title: string;
@@ -34,6 +65,9 @@ export type Task = {
   due_date: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  task_type: TaskType | null;
+  estimated_hours: number | null; // 見積工数（着手前の中立な予想・任意）
+  actual_hours: number | null; // 実績時間（完了時に入力）
   parent_id: string | null;
   created_by: string | null;
   created_at: string;
@@ -65,19 +99,53 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
 // (未設定＝中) via normalizeTask, so the UI always has a concrete value.
 export const PRIORITY_META: Record<
   TaskPriority,
-  { label: string; badgeClass: string; order: number }
+  { label: string; badgeClass: string; order: number; weight: number }
 > = {
-  high: { label: "高", badgeClass: "bg-red-100 text-red-700", order: 0 },
-  mid: { label: "中", badgeClass: "bg-amber-100 text-amber-700", order: 1 },
-  low: { label: "低", badgeClass: "bg-zinc-100 text-zinc-600", order: 2 },
+  high: { label: "高", badgeClass: "bg-red-100 text-red-700", order: 0, weight: 3 },
+  mid: { label: "中", badgeClass: "bg-amber-100 text-amber-700", order: 1, weight: 2 },
+  low: { label: "低", badgeClass: "bg-zinc-100 text-zinc-600", order: 2, weight: 1 },
 };
 
 export const PRIORITY_ORDER: TaskPriority[] = [...TASK_PRIORITIES];
 
+// Presentation for task type. English code in the DB, Japanese label in the UI
+// (same pattern as STATUS_META / PRIORITY_META).
+export const TASK_TYPE_META: Record<TaskType, { label: string }> = {
+  design: { label: "設計" },
+  implementation: { label: "実装" },
+  test: { label: "テスト" },
+  research: { label: "調査" },
+  review: { label: "レビュー" },
+  documentation: { label: "資料作成" },
+};
+
+export const TASK_TYPE_ORDER: TaskType[] = [...TASK_TYPES];
+
+// Labels for the derived difficulty (小 / 中 / 大).
+export const DIFFICULTY_META: Record<Difficulty, { label: string }> = {
+  small: { label: "小" },
+  mid: { label: "中" },
+  large: { label: "大" },
+};
+
+// Difficulty thresholds (hours): small < 4h, mid 4–16h, large >= 16h.
+const DIFFICULTY_MID_MIN_HOURS = 4;
+const DIFFICULTY_LARGE_MIN_HOURS = 16;
+
 // Columns fetched from the DB. Listing them explicitly (instead of "*") means
 // the client-side Task type and the query never silently diverge.
 const TASK_COLUMNS =
-  "id, title, assignee, assignee_id, due_date, status, priority, parent_id, created_by, created_at, completed_at";
+  "id, title, assignee, assignee_id, due_date, status, priority, task_type, estimated_hours, actual_hours, parent_id, created_by, created_at, completed_at";
+
+// Coerce a DB numeric (may arrive as number or string) into number | null.
+function toNumberOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    return Number.isNaN(n) ? null : n;
+  }
+  return null;
+}
 
 // Normalize an untyped DB row into a Task. An unexpected status falls back to
 // "todo" so an unknown value can't break status-keyed UI (labels, colors).
@@ -90,6 +158,9 @@ function normalizeTask(row: Record<string, unknown>): Task {
     due_date: typeof row.due_date === "string" ? row.due_date : null,
     status: isTaskStatus(row.status) ? row.status : "todo",
     priority: isTaskPriority(row.priority) ? row.priority : "mid",
+    task_type: isTaskType(row.task_type) ? row.task_type : null,
+    estimated_hours: toNumberOrNull(row.estimated_hours),
+    actual_hours: toNumberOrNull(row.actual_hours),
     parent_id: typeof row.parent_id === "string" ? row.parent_id : null,
     created_by: typeof row.created_by === "string" ? row.created_by : null,
     created_at: typeof row.created_at === "string" ? row.created_at : "",
@@ -115,6 +186,9 @@ export type NewTask = {
   dueDate?: string;
   status: TaskStatus;
   priority?: TaskPriority;
+  taskType?: TaskType | null;
+  estimatedHours?: number | null;
+  actualHours?: number | null;
   parentId?: string | null;
 };
 
@@ -129,6 +203,9 @@ export async function createTask(input: NewTask): Promise<Task> {
       due_date: input.dueDate || null,
       status: input.status,
       priority: input.priority ?? "mid",
+      task_type: input.taskType ?? null,
+      estimated_hours: input.estimatedHours ?? null,
+      actual_hours: input.actualHours ?? null,
       parent_id: input.parentId ?? null,
       completed_at: input.status === "done" ? new Date().toISOString() : null,
     })
@@ -148,6 +225,9 @@ export async function createTasks(inputs: NewTask[]): Promise<Task[]> {
     due_date: input.dueDate || null,
     status: input.status,
     priority: input.priority ?? "mid",
+    task_type: input.taskType ?? null,
+    estimated_hours: input.estimatedHours ?? null,
+    actual_hours: input.actualHours ?? null,
     parent_id: input.parentId ?? null,
     completed_at: input.status === "done" ? now : null,
   }));
@@ -214,6 +294,10 @@ export type TaskEdit = {
   dueDate?: string;
   status: TaskStatus;
   priority?: TaskPriority;
+  // The 3 metric fields are optional; only written when provided (see updateTask).
+  taskType?: TaskType | null;
+  estimatedHours?: number | null;
+  actualHours?: number | null;
 };
 
 /**
@@ -222,17 +306,26 @@ export type TaskEdit = {
  * status so a task moved out of "done" no longer counts as completed.
  */
 export async function updateTask(id: string, edit: TaskEdit): Promise<Task> {
+  // Build the patch. The 3 metric fields (task_type / estimated_hours /
+  // actual_hours) are only written when the caller actually provides them, so a
+  // flow that doesn't touch them (e.g. the completion dialog) can't null them out.
+  const patch: Record<string, unknown> = {
+    title: edit.title,
+    assignee: edit.assignee?.trim() || null,
+    assignee_id: edit.assigneeId ?? null,
+    due_date: edit.dueDate || null,
+    status: edit.status,
+    priority: edit.priority ?? "mid",
+    completed_at: edit.status === "done" ? new Date().toISOString() : null,
+  };
+  if (edit.taskType !== undefined) patch.task_type = edit.taskType;
+  if (edit.estimatedHours !== undefined)
+    patch.estimated_hours = edit.estimatedHours;
+  if (edit.actualHours !== undefined) patch.actual_hours = edit.actualHours;
+
   const { data, error } = await supabase
     .from("tasks")
-    .update({
-      title: edit.title,
-      assignee: edit.assignee?.trim() || null,
-      assignee_id: edit.assigneeId ?? null,
-      due_date: edit.dueDate || null,
-      status: edit.status,
-      priority: edit.priority ?? "mid",
-      completed_at: edit.status === "done" ? new Date().toISOString() : null,
-    })
+    .update(patch)
     .eq("id", id)
     .select(TASK_COLUMNS)
     .single();
@@ -285,4 +378,62 @@ export function resolveAssigneeLabel(
 ): string | null {
   if (task.assignee_id) return labelById.get(task.assignee_id) ?? null;
   return task.assignee ?? null;
+}
+
+// --- Phase 1 metrics (難易度の自動判定・成果ポイント・生産性・進捗率) ---
+
+/**
+ * Derive difficulty from the estimated hours. small < 4h, mid 4–16h,
+ * large >= 16h. Returns null when there is no (valid) estimate — the UI shows
+ * "未設定" and the task is left out of same-difficulty comparisons.
+ */
+export function difficultyFromEstimate(
+  hours: number | null | undefined,
+): Difficulty | null {
+  if (hours == null || !Number.isFinite(hours) || hours < 0) return null;
+  if (hours < DIFFICULTY_MID_MIN_HOURS) return "small";
+  if (hours < DIFFICULTY_LARGE_MIN_HOURS) return "mid";
+  return "large";
+}
+
+/**
+ * 成果ポイント (completion value): the summed priority weight of DONE tasks.
+ * A *supporting* metric (優先度重みは主観のため主指標にはしない). Pass leaf
+ * tasks — parents that only group children would double-count.
+ */
+export function completionValue(tasks: Task[]): number {
+  return tasks
+    .filter((t) => t.status === "done")
+    .reduce((sum, t) => sum + PRIORITY_META[t.priority].weight, 0);
+}
+
+/**
+ * 生産性 (productivity): completion value per actual hour, over DONE tasks that
+ * have a recorded actual_hours. Returns null when there are no usable hours, so
+ * the UI can show "未計測" instead of a misleading 0. Pass leaf tasks.
+ */
+export function productivity(tasks: Task[]): number | null {
+  let value = 0;
+  let hours = 0;
+  for (const t of tasks) {
+    if (t.status !== "done" || t.actual_hours == null || t.actual_hours <= 0)
+      continue;
+    value += PRIORITY_META[t.priority].weight;
+    hours += t.actual_hours;
+  }
+  if (hours <= 0) return null;
+  return value / hours;
+}
+
+/**
+ * 進捗率 (main progress): done leaves ÷ total leaves. Counting leaves (not the
+ * grouping parents) matches the on-the-ground feel. This is the MAIN progress
+ * number; 成果ポイント/生産性 are supporting metrics.
+ */
+export function leafProgress(tasks: Task[]): {
+  done: number;
+  total: number;
+  percent: number;
+} {
+  return taskProgress(leafTasks(tasks));
 }

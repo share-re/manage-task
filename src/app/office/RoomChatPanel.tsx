@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import UchidaIcon from "@/components/UchidaIcon";
 
 // A message in the office room chat. `ai` marks 内田さん's auto/《@AI》 replies.
 export type RoomMsg = { id: string; name: string; text: string; ts: number; ai?: boolean };
@@ -51,8 +52,15 @@ export default function RoomChatPanel({
           const mine = !m.ai && m.name === selfName;
           return (
             <div key={m.id} className={mine ? "self-end" : "self-start"}>
-              <span className={`mb-0.5 block text-[10px] ${m.ai ? "text-emerald-700" : "text-zinc-400"} ${mine ? "text-right" : ""}`}>
-                {m.ai ? "🤖 内田さん" : m.name}
+              <span className={`mb-0.5 flex items-center gap-1 text-[10px] ${m.ai ? "text-emerald-700" : "text-zinc-400"} ${mine ? "justify-end" : ""}`}>
+                {m.ai ? (
+                  <>
+                    <UchidaIcon size={16} />
+                    内田さん
+                  </>
+                ) : (
+                  m.name
+                )}
               </span>
               <div
                 className={

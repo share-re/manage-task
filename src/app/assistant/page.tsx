@@ -243,7 +243,14 @@ export default function AssistantPage() {
         };
         // 「1日の上限」または再試行回数を使い切ったときは、ここで打ち切ってエラー表示。
         if (data.quota !== "temporary" || attempt === MAX_TRIES) {
-          setError(data.error ?? "エラーが発生しました。");
+          // 再試行を使い切った場合は、実態に合った文言に差し替える
+          // （サーバー文言のままだと「再試行しない場面」なのに誤解を招くため）。
+          const gaveUp = data.quota === "temporary" && attempt === MAX_TRIES;
+          setError(
+            gaveUp
+              ? "自動で再試行しましたが、混雑が続いています。少し時間をおいて、もう一度お試しください。"
+              : (data.error ?? "エラーが発生しました。"),
+          );
           revert();
           return;
         }

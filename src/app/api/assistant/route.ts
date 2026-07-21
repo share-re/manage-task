@@ -160,9 +160,11 @@ export async function POST(req: Request) {
       // 1分あたりの上限(RPM/TPM)や判別不能な429は「一時的」。
       // 何秒待てばよいか(retryAfterSec)を添えて返し、待つ・再試行するのは画面側が行う
       // （サーバーレス関数内で長時間待つとタイムアウトするため）。
+      // ※「再試行します」とはここでは言わない。再試行するかどうかは画面側の判断のため。
       return Response.json(
         {
-          error: "ただいまアクセスが混み合っています。少し待って自動で再試行します。",
+          error:
+            "ただいまアクセスが混み合っています。少し時間をおいて、もう一度お試しください。（1分あたりの利用上限）",
           quota: "temporary",
           retryAfterSec: quota.retryDelaySec ?? 10,
         },

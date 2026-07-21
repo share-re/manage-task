@@ -23,6 +23,8 @@ import {
   TASK_TYPE_ORDER,
   DIFFICULTY_META,
   difficultyFromEstimate,
+  estimateAchievement,
+  productivity,
   type Task,
   type TaskEdit,
   type TaskStatus,
@@ -32,10 +34,16 @@ import {
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
+import FeatureProgress from "@/components/FeatureProgress";
 import ForestBackground from "@/components/ForestBackground";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
+}
+
+// Format hours without a trailing ".0" (4 -> "4", 4.5 -> "4.5").
+function formatHours(h: number): string {
+  return Number.isInteger(h) ? String(h) : String(Math.round(h * 10) / 10);
 }
 
 // Whole days from today until a due date (UTC day granularity). Negative = overdue.
@@ -107,6 +115,7 @@ function TaskRow({
   members,
   labelById,
   onSave,
+  childActualHours = 0,
 }: {
   task: Task;
   comments: TaskComment[];
@@ -121,6 +130,7 @@ function TaskRow({
   members: Member[];
   labelById: Map<string, string>;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
+  childActualHours?: number;
 }) {
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
@@ -246,11 +256,27 @@ function TaskRow({
             <span
               className={`rounded px-1.5 py-0.5 font-medium ${PRIORITY_META[task.priority].badgeClass}`}
             >
-              {PRIORITY_META[task.priority].label}
+              優先 {PRIORITY_META[task.priority].label}
             </span>
+            {/* Difficulty tag: outlined (vs. the filled priority badge) so the
+                two "中" labels can never be confused. Shown only when an
+                estimate exists. */}
+            {task.estimated_hours != null &&
+              (() => {
+                const d = difficultyFromEstimate(task.estimated_hours);
+                return d ? (
+                  <span className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-500">
+                    見積 {formatHours(task.estimated_hours)}h・
+                    {DIFFICULTY_META[d].label}
+                  </span>
+                ) : null;
+              })()}
             <span>
               {resolveAssigneeLabel(task, labelById) || "担当者なし"} ・{" "}
               {formatDue(task.due_date)}
+              {childCount > 0 &&
+                childActualHours > 0 &&
+                ` ・ 実績合計 ${formatHours(childActualHours)}h`}
             </span>
             {(() => {
               const badge = dueBadge(task);
@@ -1029,6 +1055,10 @@ export default function TasksPage() {
   // Progress is counted over LEAF tasks (child + standalone tasks), excluding
   // parents that only group children — see leafTasks() for why.
   const leaves = useMemo(() => leafTasks(tasks), [tasks]);
+  // Supporting metrics (Q-02): achievement reads on its own (1.0 = on
+  // estimate); productivity is comparison-only and never judged standalone.
+  const achievement = useMemo(() => estimateAchievement(leaves), [leaves]);
+  const teamProductivity = useMemo(() => productivity(leaves), [leaves]);
   const progressScope = filterAssigneeId
     ? leaves.filter((t) => t.assignee_id === filterAssigneeId)
     : leaves;
@@ -1057,6 +1087,12 @@ export default function TasksPage() {
     return { overdue, dueToday, dueSoon, unassigned };
   }, [tasks]);
 
+  // Sum of a parent's children actual hours (parent roll-up display, Q-04).
+  const childActualSum = (parentId: string) =>
+    tasks
+      .filter((t) => t.parent_id === parentId)
+      .reduce((sum, t) => sum + (t.actual_hours ?? 0), 0);
+
   const renderRow = (
     task: Task,
     opts: { isChild?: boolean; childCount?: number } = {},
@@ -1068,6 +1104,9 @@ export default function TasksPage() {
       deleteMode={deleteMode}
       isChild={opts.isChild ?? false}
       childCount={opts.childCount ?? 0}
+      childActualHours={
+        (opts.childCount ?? 0) > 0 ? childActualSum(task.id) : 0
+      }
       onChangeStatus={handleStatusChange}
       onToggleComments={toggleComments}
       onAddComment={handleAddComment}
@@ -1142,6 +1181,62 @@ export default function TasksPage() {
         label={progressLabel}
       />
 
+      {/* Supporting metric cards: 見積り達成率 (reads standalone, 1.0 = on
+          estimate) and 生産性 (comparison-only; now accumulating the non-AI
+          baseline for phase 4). */}
+      <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="rounded-lg bg-white px-4 py-3 shadow-sm ring-1 ring-black/5">
+          <div className="text-[11px] text-zinc-500">見積り達成率</div>
+          {achievement ? (
+            <>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                <span className="text-xl font-semibold text-zinc-900">
+                  {achievement.ratio.toFixed(2)}
+                </span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                    achievement.ratio >= 1
+                      ? "bg-green-100 text-green-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {achievement.ratio >= 1
+                    ? `見積りより${Math.round((achievement.ratio - 1) * 100)}%速い`
+                    : `見積りより${Math.round((1 - achievement.ratio) * 100)}%多くかかった`}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-400">
+                基準1.0＝見積りどおり ・ 対象 {achievement.count}件（見積り入力済みの完了タスク）
+              </div>
+            </>
+          ) : (
+            <div className="mt-0.5 text-sm text-zinc-400">
+              未計測（見積り・実績がそろった完了タスクがまだありません）
+            </div>
+          )}
+        </div>
+        <div className="rounded-lg bg-white px-4 py-3 shadow-sm ring-1 ring-black/5">
+          <div className="text-[11px] text-zinc-500">生産性（補助）</div>
+          {teamProductivity != null ? (
+            <>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                <span className="text-xl font-semibold text-zinc-900">
+                  {teamProductivity.toFixed(1)}
+                </span>
+                <span className="text-xs text-zinc-500">pt/時</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-400">
+                比較相手を蓄積中（非AIの基準値）・ 単体では評価しない
+              </div>
+            </>
+          ) : (
+            <div className="mt-0.5 text-sm text-zinc-400">
+              未計測（実績時間つきの完了タスクがまだありません）
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Risk summary — at-risk tasks at a glance (team-wide, incomplete only) */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {(
@@ -1165,6 +1260,10 @@ export default function TasksPage() {
           </div>
         ))}
       </div>
+
+      {/* Per-feature progress with delay badges (要確認-5: the first cross
+          view). Feature = parent task. */}
+      <FeatureProgress tasks={tasks} labelById={labelById} />
 
       {/* Sticky header: tabs + toolbar stay visible while the list scrolls. */}
       <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-zinc-200 bg-zinc-50 px-4 pt-1">

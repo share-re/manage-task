@@ -42,23 +42,6 @@ function splitAcc(acc: string): { textPart: string; metaRaw: string } {
 // 入力欄の最大高さ(px)。約5行分。これを超えたら伸ばさず、入力欄の中でスクロールさせる。
 const MAX_INPUT_HEIGHT = 128;
 
-// 一時的な429（1分あたりの上限）のときの自動再試行の最大回数（最初の送信を含めて3回）。
-const MAX_TRIES = 3;
-
-// 指定ミリ秒だけ待つ。ただし停止ボタン（abort）が押されたら、待ち切らずにすぐ戻る。
-function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) return resolve();
-    const timer = setTimeout(finish, ms);
-    function finish() {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    }
-    signal.addEventListener("abort", finish);
-  });
-}
-
 // 隠し要素: 辛いもの好きという人格設定（docs/persona-ai-curiosity.md）に合わせ、
 // 直近の返答が辛いもの寄りの話題ならアバターのバッジを🌶に差し替える。単純な語句判定でよい。
 const SPICY_WORDS = /辛い|激辛|唐辛子|カレー|スパイス|麻婆|キムチ|ハバネロ/;
@@ -75,7 +58,6 @@ export default function AssistantPage() {
   const [input, setInput] = useState(""); // 入力欄の文字
   const [loading, setLoading] = useState(false); // 返答待ちかどうか
   const [error, setError] = useState<string>(); // エラー文言
-  const [notice, setNotice] = useState<string>(); // 自動再試行中などの案内文言（エラーではない）
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null); // コピー済みの吹き出し
   // 賢さモード。ON のとき、次からの送信を上位モデル(Flash)で行う（チャット欄外のトグルで切替）。
   const [smartMode, setSmartMode] = useState(false);
@@ -224,50 +206,19 @@ export default function AssistantPage() {
     };
 
     try {
-      // 一時的な429（1分あたりの上限）のときは、少し待って自動で送り直す。
-      // 最初の送信を含めて最大 MAX_TRIES 回。「1日の上限」のときは再試行しない。
-      let res: Response | undefined;
-      for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
-        res = await fetch("/api/assistant", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, history, userName, useSmartModel }),
-          signal: controller.signal,
-        });
-        if (res.status !== 429) break; // 429以外（成功や別のエラー）はループを抜けて下で処理
+      const res = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, history, userName, useSmartModel }),
+        signal: controller.signal,
+      });
 
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          quota?: string;
-          retryAfterSec?: number;
-        };
-        // 「1日の上限」または再試行回数を使い切ったときは、ここで打ち切ってエラー表示。
-        if (data.quota !== "temporary" || attempt === MAX_TRIES) {
-          // 再試行を使い切った場合は、実態に合った文言に差し替える
-          // （サーバー文言のままだと「再試行しない場面」なのに誤解を招くため）。
-          const gaveUp = data.quota === "temporary" && attempt === MAX_TRIES;
-          setError(
-            gaveUp
-              ? "自動で再試行しましたが、混雑が続いています。少し時間をおいて、もう一度お試しください。"
-              : (data.error ?? "エラーが発生しました。"),
-          );
-          revert();
-          return;
-        }
-        // 待ち時間：サーバーが教えてくれた秒数を基準に、試行ごとに2倍（指数バックオフ）。
-        // 長くなりすぎないよう上限60秒で頭打ちにする。
-        const waitSec = Math.min((data.retryAfterSec ?? 5) * 2 ** (attempt - 1), 60);
-        setNotice(
-          `混み合っています。${waitSec}秒待って自動で再試行します…（${attempt}/${MAX_TRIES - 1}回目）`,
-        );
-        await sleepAbortable(waitSec * 1000, controller.signal);
-        if (controller.signal.aborted) return; // 待っている間に停止ボタンが押された
-        setNotice(undefined);
-      }
-
-      if (!res || !res.ok || !res.body) {
-        const data = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
-        setError(data?.error ?? "エラーが発生しました。");
+      if (!res.ok || !res.body) {
+        // 429（利用上限）もここに来る。サーバーが原因別の文言
+        // （1日の上限→「明日また」/ 一時的→「混雑しています」）を返すので、そのまま表示する。
+        // 自動再試行はしない。もう一度送るかどうかはユーザーに任せる。
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "エラーが発生しました。");
         revert();
         return;
       }
@@ -387,7 +338,6 @@ export default function AssistantPage() {
       }
     } finally {
       setLoading(false);
-      setNotice(undefined); // 再試行の案内が残らないように消す
       abortRef.current = null;
     }
   }
@@ -711,8 +661,6 @@ export default function AssistantPage() {
 
       {/* エラー表示 */}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      {/* 自動再試行中などの案内（エラーではないのでオレンジで控えめに） */}
-      {notice && <p className="mt-2 text-sm text-amber-600">{notice}</p>}
 
       {/* 賢さモードの切り替え（チャット欄の外）。ONにすると次からの送信を賢いモデル(Flash)で行う。
           先にONにしておけば、ふつうの返答を1回はさまずに、最初から賢く答えてもらえる。 */}

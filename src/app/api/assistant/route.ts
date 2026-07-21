@@ -1,6 +1,7 @@
 import { GoogleGenAI, type GroundingMetadata } from "@google/genai";
 import { UCHIDA_SYSTEM_PROMPT } from "@/lib/uchidaPrompt";
 import { parseQuotaError } from "@/lib/geminiQuota";
+import { withInternalInfoGuard } from "@/lib/internalInfoGuard";
 import { getUserFromRequest } from "@/lib/serverAuth";
 
 // このAPIはサーバ側で動かす（鍵をブラウザに出さないため）。
@@ -103,7 +104,11 @@ export async function POST(req: Request) {
     });
 
     // 今回の発言を送り、返答を「少しずつ」受け取る（ストリーミング）。
-    const result = await chat.sendMessageStream({ message });
+    // #72対策: 社内の固有情報（納期・会議・担当者など）を問う気配のある発言には、
+    // 創作を防ぐ注意書きをサーバー側で機械的に添える（画面表示・保存には含まれない）。
+    const result = await chat.sendMessageStream({
+      message: withInternalInfoGuard(message),
+    });
 
     // 受け取った文字を、そのままクライアントへ少しずつ流すストリームを作る。
     const encoder = new TextEncoder();

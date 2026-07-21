@@ -8,6 +8,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { isAdmin } from "@/lib/roles";
 import LogoutButton from "@/components/LogoutButton";
 import PasskeyRegisterButton from "@/components/PasskeyRegisterButton";
+import UchidaIcon from "@/components/UchidaIcon";
 import {
   listTasks,
   taskProgress,
@@ -483,7 +484,9 @@ export default function OfficePage() {
           <Link href="/tasks" title="進捗管理" className={navLink}>✅</Link>
           <Link href="/tasks/mail" title="メール" className={navLink}>✉️</Link>
           <Link href="/forest" title="植林" className={navLink}>🌱</Link>
-          <a href="/assistant" target="_blank" rel="noopener noreferrer" title="AI内田さん" className={navLink}>🤖</a>
+          <a href="/assistant" target="_blank" rel="noopener noreferrer" title="AI内田さん" className={`${navLink} inline-flex items-center`}>
+            <UchidaIcon size={18} label="AI内田さん" />
+          </a>
         </div>
       </div>
 

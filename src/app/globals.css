@@ -24,3 +24,27 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Spark badge blink on the AI Uchida avatar, shown while a reply is generated. */
+@keyframes uchida-spark {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+.animate-uchida-spark {
+  animation: uchida-spark 1.4s ease-in-out infinite;
+}
+
+/* Motion sensitivity: keep the badge visible, just stop it moving. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-uchida-spark {
+    animation: none;
+  }
+}

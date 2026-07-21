@@ -6,6 +6,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuth } from "@/components/AuthProvider";
 import ForestBackground from "@/components/ForestBackground";
+import UchidaIcon from "@/components/UchidaIcon";
 import {
   createConversation,
   addMessage,
@@ -40,6 +41,10 @@ function splitAcc(acc: string): { textPart: string; metaRaw: string } {
 
 // 入力欄の最大高さ(px)。約5行分。これを超えたら伸ばさず、入力欄の中でスクロールさせる。
 const MAX_INPUT_HEIGHT = 128;
+
+// 隠し要素: 辛いもの好きという人格設定（docs/persona-ai-curiosity.md）に合わせ、
+// 直近の返答が辛いもの寄りの話題ならアバターのバッジを🌶に差し替える。単純な語句判定でよい。
+const SPICY_WORDS = /辛い|激辛|唐辛子|カレー|スパイス|麻婆|キムチ|ハバネロ/;
 
 export default function AssistantPage() {
   const { session, profileName } = useAuth();
@@ -396,6 +401,11 @@ export default function AssistantPage() {
     }
   }
 
+  // ヘッダーのアバターに出すバッジ。直近の返答が辛い話題のときだけ🌶に変わる。
+  const lastMsg = messages[messages.length - 1];
+  const avatarBadge =
+    !loading && lastMsg?.role === "model" && SPICY_WORDS.test(lastMsg.text) ? "chili" : "spark";
+
   return (
     // このページだけ常にライト表示に固定（OSがダークでも反転させない）。
     <div
@@ -423,9 +433,7 @@ export default function AssistantPage() {
       >
         {/* ブランド */}
         <div className="flex items-center gap-2 px-3 pb-2 pt-4">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-base">
-            🌱
-          </div>
+          <UchidaIcon size={32} badge="spark" className="shrink-0" />
           <span className="font-bold text-emerald-800">AI内田さん</span>
           {/* スマホ用の閉じるボタン */}
           <button
@@ -536,10 +544,14 @@ export default function AssistantPage() {
             <path d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        {/* 芽のアバター */}
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-lg">
-          🌱
-        </div>
+        {/* AI内田さんのアバター。返答生成中は「考え中」の顔＋バッジ点滅にする。 */}
+        <UchidaIcon
+          size={40}
+          badge={avatarBadge}
+          animateBadge={loading}
+          expression={loading ? "think" : "normal"}
+          className="shrink-0"
+        />
         <div className="min-w-0">
           <h1 className="text-lg font-bold text-emerald-800">AI内田さん</h1>
           <p className="truncate text-xs text-emerald-700/70">
@@ -569,62 +581,66 @@ export default function AssistantPage() {
               {copyButton(m.text, i)}
             </div>
           ) : (
-            <div key={i} className="flex flex-col items-start">
-              {/* Markdownを描画（生HTMLは描画しないので安全）。要素ごとの見た目はTailwindで指定。 */}
-              <div className="max-w-[80%] rounded-2xl bg-white/90 px-4 py-2 text-sm text-zinc-900 shadow-sm ring-1 ring-black/5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-200/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-bold [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-100 [&_pre]:p-3 [&_pre]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-bold [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5">
-                <Markdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    // 本文中のリンクは新しいタブで開く。
-                    // クリックでこのページから離脱すると、保存していない会話が消えてしまうため。
-                    a({ node, ...props }) {
-                      return <a {...props} target="_blank" rel="noreferrer" />;
-                    },
-                  }}
-                >
-                  {m.text}
-                </Markdown>
-              </div>
-              {/* 検索を使ったときの「参照元（出典）」。無いときは表示しない。 */}
-              {m.sources && m.sources.length > 0 && (
-                <div className="mt-1 max-w-[80%] text-xs text-emerald-800/70">
-                  <p className="font-medium">参照</p>
-                  <ul className="list-disc pl-4">
-                    {m.sources.map((s, k) => (
-                      <li key={k}>
-                        <a
-                          href={s.uri}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline hover:text-emerald-700"
-                        >
-                          {s.title || s.uri}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
+            <div key={i} className="flex items-start gap-2">
+              {/* 誰の発言か一目で分かるよう、AIの吹き出しの左に小さいアバターを置く（バッジなし） */}
+              <UchidaIcon size={24} className="mt-1 shrink-0" />
+              <div className="flex min-w-0 flex-col items-start">
+                {/* Markdownを描画（生HTMLは描画しないので安全）。要素ごとの見た目はTailwindで指定。 */}
+                <div className="max-w-[80%] rounded-2xl bg-white/90 px-4 py-2 text-sm text-zinc-900 shadow-sm ring-1 ring-black/5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-200/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-bold [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-100 [&_pre]:p-3 [&_pre]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-bold [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5">
+                  <Markdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      // 本文中のリンクは新しいタブで開く。
+                      // クリックでこのページから離脱すると、保存していない会話が消えてしまうため。
+                      a({ node, ...props }) {
+                        return <a {...props} target="_blank" rel="noreferrer" />;
+                      },
+                    }}
+                  >
+                    {m.text}
+                  </Markdown>
                 </div>
-              )}
-              {/* Googleの検索候補（Search Suggestions）。利用規約で表示が求められるHTMLをそのまま描画。 */}
-              {m.suggestions && (
-                <div
-                  className="mt-1 max-w-[80%]"
-                  dangerouslySetInnerHTML={{ __html: m.suggestions }}
-                />
-              )}
-              {/* コピー ボタン（アイコン） */}
-              {copyButton(m.text, i)}
-              {/* 直前のAI返答にだけ「考え直して」を出す（生成中は隠す）。いまの賢さモードで送り直す。 */}
-              {i === messages.length - 1 && !loading && (
-                <button
-                  type="button"
-                  onClick={retry}
-                  title="同じ質問を、いまのモードで答え直します"
-                  className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-600/40 transition hover:bg-emerald-200"
-                >
-                  🔄 考え直して
-                </button>
-              )}
+                {/* 検索を使ったときの「参照元（出典）」。無いときは表示しない。 */}
+                {m.sources && m.sources.length > 0 && (
+                  <div className="mt-1 max-w-[80%] text-xs text-emerald-800/70">
+                    <p className="font-medium">参照</p>
+                    <ul className="list-disc pl-4">
+                      {m.sources.map((s, k) => (
+                        <li key={k}>
+                          <a
+                            href={s.uri}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline hover:text-emerald-700"
+                          >
+                            {s.title || s.uri}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {/* Googleの検索候補（Search Suggestions）。利用規約で表示が求められるHTMLをそのまま描画。 */}
+                {m.suggestions && (
+                  <div
+                    className="mt-1 max-w-[80%]"
+                    dangerouslySetInnerHTML={{ __html: m.suggestions }}
+                  />
+                )}
+                {/* コピー ボタン（アイコン） */}
+                {copyButton(m.text, i)}
+                {/* 直前のAI返答にだけ「考え直して」を出す（生成中は隠す）。いまの賢さモードで送り直す。 */}
+                {i === messages.length - 1 && !loading && (
+                  <button
+                    type="button"
+                    onClick={retry}
+                    title="同じ質問を、いまのモードで答え直します"
+                    className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-600/40 transition hover:bg-emerald-200"
+                  >
+                    🔄 考え直して
+                  </button>
+                )}
+              </div>
             </div>
           ),
         )}

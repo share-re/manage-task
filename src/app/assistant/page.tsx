@@ -42,6 +42,23 @@ function splitAcc(acc: string): { textPart: string; metaRaw: string } {
 // 入力欄の最大高さ(px)。約5行分。これを超えたら伸ばさず、入力欄の中でスクロールさせる。
 const MAX_INPUT_HEIGHT = 128;
 
+// 一時的な429（1分あたりの上限）のときの自動再試行の最大回数（最初の送信を含めて3回）。
+const MAX_TRIES = 3;
+
+// 指定ミリ秒だけ待つ。ただし停止ボタン（abort）が押されたら、待ち切らずにすぐ戻る。
+function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish);
+  });
+}
+
 // 隠し要素: 辛いもの好きという人格設定（docs/persona-ai-curiosity.md）に合わせ、
 // 直近の返答が辛いもの寄りの話題ならアバターのバッジを🌶に差し替える。単純な語句判定でよい。
 const SPICY_WORDS = /辛い|激辛|唐辛子|カレー|スパイス|麻婆|キムチ|ハバネロ/;
@@ -58,6 +75,7 @@ export default function AssistantPage() {
   const [input, setInput] = useState(""); // 入力欄の文字
   const [loading, setLoading] = useState(false); // 返答待ちかどうか
   const [error, setError] = useState<string>(); // エラー文言
+  const [notice, setNotice] = useState<string>(); // 自動再試行中などの案内文言（エラーではない）
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null); // コピー済みの吹き出し
   // 賢さモード。ON のとき、次からの送信を上位モデル(Flash)で行う（チャット欄外のトグルで切替）。
   const [smartMode, setSmartMode] = useState(false);
@@ -92,10 +110,18 @@ export default function AssistantPage() {
     el.style.height = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT) + "px";
   }, [input]);
 
+  // 保存済みの会話一覧を取り直す（最近使った順）。
+  // ※すぐ下の useEffect から使うため、useEffect より前に宣言しておく（lintの規則）。
+  function refreshConversations() {
+    // 取得できたらコールバックで一覧を反映する（effect内で同期的にsetStateしない書き方）。
+    return listConversations()
+      .then(setConversations)
+      .catch((e) => console.error("会話一覧の取得に失敗:", e));
+  }
+
   // ログインできたら、保存済みの会話一覧を読み込む（履歴パネル用）。
   useEffect(() => {
     if (session) refreshConversations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   // 返答をクリップボードにコピー（HTTPS / localhost でのみ動く）。
@@ -198,16 +224,43 @@ export default function AssistantPage() {
     };
 
     try {
-      const res = await fetch("/api/assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history, userName, useSmartModel }),
-        signal: controller.signal,
-      });
+      // 一時的な429（1分あたりの上限）のときは、少し待って自動で送り直す。
+      // 最初の送信を含めて最大 MAX_TRIES 回。「1日の上限」のときは再試行しない。
+      let res: Response | undefined;
+      for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+        res = await fetch("/api/assistant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, history, userName, useSmartModel }),
+          signal: controller.signal,
+        });
+        if (res.status !== 429) break; // 429以外（成功や別のエラー）はループを抜けて下で処理
 
-      if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "エラーが発生しました。");
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          quota?: string;
+          retryAfterSec?: number;
+        };
+        // 「1日の上限」または再試行回数を使い切ったときは、ここで打ち切ってエラー表示。
+        if (data.quota !== "temporary" || attempt === MAX_TRIES) {
+          setError(data.error ?? "エラーが発生しました。");
+          revert();
+          return;
+        }
+        // 待ち時間：サーバーが教えてくれた秒数を基準に、試行ごとに2倍（指数バックオフ）。
+        // 長くなりすぎないよう上限60秒で頭打ちにする。
+        const waitSec = Math.min((data.retryAfterSec ?? 5) * 2 ** (attempt - 1), 60);
+        setNotice(
+          `混み合っています。${waitSec}秒待って自動で再試行します…（${attempt}/${MAX_TRIES - 1}回目）`,
+        );
+        await sleepAbortable(waitSec * 1000, controller.signal);
+        if (controller.signal.aborted) return; // 待っている間に停止ボタンが押された
+        setNotice(undefined);
+      }
+
+      if (!res || !res.ok || !res.body) {
+        const data = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
+        setError(data?.error ?? "エラーが発生しました。");
         revert();
         return;
       }
@@ -327,6 +380,7 @@ export default function AssistantPage() {
       }
     } finally {
       setLoading(false);
+      setNotice(undefined); // 再試行の案内が残らないように消す
       abortRef.current = null;
     }
   }
@@ -334,15 +388,6 @@ export default function AssistantPage() {
   // 生成を途中で止める（停止ボタン）。受信済みの文章はそのまま残す。
   function stop() {
     abortRef.current?.abort();
-  }
-
-  // 保存済みの会話一覧を取り直す（最近使った順）。
-  async function refreshConversations() {
-    try {
-      setConversations(await listConversations());
-    } catch (e) {
-      console.error("会話一覧の取得に失敗:", e);
-    }
   }
 
   // 過去の会話を開いて、続きから表示する。
@@ -427,7 +472,9 @@ export default function AssistantPage() {
       {/* 左サイドバー：新しい会話＋履歴一覧。PCは常時表示、スマホは☰で開閉する引き出し。 */}
       <aside
         className={
-          "fixed inset-y-0 left-0 z-30 flex w-64 shrink-0 transform flex-col bg-white/95 shadow-lg ring-1 ring-black/5 backdrop-blur transition-transform md:static md:z-10 md:translate-x-0 md:shadow-none md:ring-0 " +
+          // md:h-[100dvh] で高さを画面ぴったりに固定し、あふれた分は中の履歴一覧だけがスクロールする
+          // （これが無いと履歴が増えたときに aside ごと伸びて、上下のボタンが画面外に出てしまう）。
+          "fixed inset-y-0 left-0 z-30 flex w-64 shrink-0 transform flex-col bg-white/95 shadow-lg ring-1 ring-black/5 backdrop-blur transition-transform md:static md:z-10 md:h-[100dvh] md:translate-x-0 md:shadow-none md:ring-0 " +
           (sidebarOpen ? "translate-x-0" : "-translate-x-full")
         }
       >
@@ -461,8 +508,8 @@ export default function AssistantPage() {
 
         <div className="px-3 pb-1 text-xs text-zinc-400">履歴</div>
 
-        {/* 会話一覧 */}
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
+        {/* 会話一覧（ここだけスクロール。min-h-0 が無いと中身につられて縮まずスクロールしない） */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {conversations.length === 0 ? (
             <p className="px-2 py-2 text-xs text-zinc-500">
               まだ保存された会話はありません。
@@ -657,6 +704,8 @@ export default function AssistantPage() {
 
       {/* エラー表示 */}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {/* 自動再試行中などの案内（エラーではないのでオレンジで控えめに） */}
+      {notice && <p className="mt-2 text-sm text-amber-600">{notice}</p>}
 
       {/* 賢さモードの切り替え（チャット欄の外）。ONにすると次からの送信を賢いモデル(Flash)で行う。
           先にONにしておけば、ふつうの返答を1回はさまずに、最初から賢く答えてもらえる。 */}

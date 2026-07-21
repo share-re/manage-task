@@ -1,8 +1,6 @@
 import { GoogleGenAI, type GroundingMetadata } from "@google/genai";
 import { UCHIDA_SYSTEM_PROMPT } from "@/lib/uchidaPrompt";
 import { parseQuotaError } from "@/lib/geminiQuota";
-import { withInternalInfoGuard } from "@/lib/internalInfoGuard";
-import { getUserFromRequest } from "@/lib/serverAuth";
 
 // このAPIはサーバ側で動かす（鍵をブラウザに出さないため）。
 // Edgeランタイムだと不具合が出やすいので Node を明示する。
@@ -29,16 +27,6 @@ function buildSourcesMeta(gm: GroundingMetadata | undefined) {
 }
 
 export async function POST(req: Request) {
-  // 認証チェック（#76）。ログイン済みユーザーの本物のトークンでなければ、
-  // AIを呼ぶ前に 401 で断る（画面はログイン必須でも、APIだけ直接叩けたため）。
-  const authedUser = await getUserFromRequest(req);
-  if (!authedUser) {
-    return Response.json(
-      { error: "ログインが必要です。セッションが切れている場合は、再ログインしてください。" },
-      { status: 401 },
-    );
-  }
-
   // 鍵が未設定なら、原因が分かるメッセージを返して終了する。
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -52,6 +40,7 @@ export async function POST(req: Request) {
   let body: {
     message?: unknown;
     history?: unknown;
+    userName?: unknown;
     useSmartModel?: unknown;
   };
   try {
@@ -66,8 +55,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "メッセージが空です。" }, { status: 400 });
   }
 
-  // 相手の名前。クライアントの申告値は信用せず、認証情報から解決した名前を使う（KI-03）。
-  const userName = authedUser.displayName;
+  // 相手の名前（ログイン中のユーザー名）。あれば人格に伝えて「〇〇さん」と呼ばせる。
+  const userName = typeof body.userName === "string" ? body.userName.trim() : "";
 
   // 使うモデルを選ぶ。
   // ふだんは軽い Flash-Lite（1日に使える回数が多い＝429で止まりにくい）。
@@ -104,11 +93,7 @@ export async function POST(req: Request) {
     });
 
     // 今回の発言を送り、返答を「少しずつ」受け取る（ストリーミング）。
-    // #72対策: 社内の固有情報（納期・会議・担当者など）を問う気配のある発言には、
-    // 創作を防ぐ注意書きをサーバー側で機械的に添える（画面表示・保存には含まれない）。
-    const result = await chat.sendMessageStream({
-      message: withInternalInfoGuard(message),
-    });
+    const result = await chat.sendMessageStream({ message });
 
     // 受け取った文字を、そのままクライアントへ少しずつ流すストリームを作る。
     const encoder = new TextEncoder();

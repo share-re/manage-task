@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "ingest": "node --env-file=.env.local --import tsx scripts/ingest.ts"
+    "ingest": "node --env-file=.env.local --import tsx scripts/ingest.ts",
+    "search": "node --env-file=.env.local --import tsx scripts/search.ts"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

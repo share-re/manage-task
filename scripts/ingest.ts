@@ -23,8 +23,10 @@ const EMBED_DIMS = 768;
 // Texts per embedding request / pause between requests: stay well under the
 // free-tier rate limits (NFR-Q2-02).
 const EMBED_BATCH = 20;
-const BATCH_PAUSE_MS = 1000;
-const MAX_RETRIES = 3;
+const BATCH_PAUSE_MS = 2000;
+// The free tier throttles tokens per minute; the 30s-wait retry loop is what
+// actually paces the run, so be patient before giving up.
+const MAX_RETRIES = 6;
 const INSERT_BATCH = 100;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

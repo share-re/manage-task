@@ -47,8 +47,8 @@ create table if not exists public.projects (
 );
 
 -- 既定案件を1回だけ作る（既に1件でもあれば作らない）
-insert into public.projects (name)
-select '既定案件'
+insert into public.projects (name, status)
+select '既定案件', 'active'
 where not exists (select 1 from public.projects);
 
 alter table public.tasks
@@ -92,6 +92,10 @@ create table if not exists public.milestones (
   note        text,
   created_at  timestamptz not null default now()
 );
+-- 古い milestones（project_id 列なし）が既にある場合に備えて後付けする
+-- （create table if not exists は既存テーブルの列を足さないため）。
+alter table public.milestones
+  add column if not exists project_id uuid references public.projects(id);
 create index if not exists milestones_project_id_idx on public.milestones(project_id);
 
 -- 5) milestone_tasks：マイルストーン⇔タスク（多対多）… 着手前決定4

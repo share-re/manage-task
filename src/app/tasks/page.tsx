@@ -23,12 +23,14 @@ import {
   TASK_TYPE_ORDER,
   DIFFICULTY_META,
   difficultyFromEstimate,
+  freezeBaseline,
   type Task,
   type TaskEdit,
   type TaskStatus,
   type TaskPriority,
   type TaskType,
 } from "@/lib/tasks";
+import { getDefaultProjectId } from "@/lib/projects";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
@@ -136,6 +138,7 @@ function TaskRow({
   const [editing, setEditing] = useState(false);
   const [eTitle, setETitle] = useState(task.title);
   const [eAssigneeId, setEAssigneeId] = useState(task.assignee_id ?? "");
+  const [eStart, setEStart] = useState(task.start_date ?? "");
   const [eDue, setEDue] = useState(task.due_date ?? "");
   const [eStatus, setEStatus] = useState<TaskStatus>(task.status);
   const [ePriority, setEPriority] = useState<TaskPriority>(task.priority);
@@ -157,6 +160,7 @@ function TaskRow({
   function startEdit() {
     setETitle(task.title);
     setEAssigneeId(task.assignee_id ?? "");
+    setEStart(task.start_date ?? "");
     setEDue(task.due_date ?? "");
     setEStatus(task.status);
     setEPriority(task.priority);
@@ -182,17 +186,25 @@ function TaskRow({
       setEditError("完了にするには実績時間を入力してください。");
       return;
     }
+    // Start date must not be after the due date (要確認-4 / PR2).
+    if (eStart && eDue && eStart > eDue) {
+      setEditError("開始日は期限より前にしてください。");
+      return;
+    }
     setSavingEdit(true);
     try {
       await onSave(task.id, {
         title,
         assigneeId: eAssigneeId || null,
+        startDate: eStart,
         dueDate: eDue,
         status: eStatus,
         priority: ePriority,
         taskType: eTaskType || null,
         estimatedHours: eEstimatedHours.trim() ? Number(eEstimatedHours) : null,
         actualHours: eActualHours.trim() ? Number(eActualHours) : null,
+        // Freeze the baseline on first save if it's still empty (要確認-4).
+        ...freezeBaseline(task, eStart, eDue),
       });
       setEditing(false);
     } catch {
@@ -270,6 +282,9 @@ function TaskRow({
               })()}
             <span>
               {resolveAssigneeLabel(task, labelById) || "担当者なし"} ・{" "}
+              {task.start_date
+                ? `${task.start_date.replaceAll("-", "/")} 〜 `
+                : ""}
               {formatDue(task.due_date)}
               {childCount > 0 &&
                 childActualHours > 0 &&
@@ -336,8 +351,8 @@ function TaskRow({
                 className={fieldClass}
               />
             </label>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <label className="flex flex-1 flex-col gap-1">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <label className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-zinc-600">
                   担当者
                 </span>
@@ -353,6 +368,15 @@ function TaskRow({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">開始日</span>
+                <input
+                  type="date"
+                  value={eStart}
+                  onChange={(e) => setEStart(e.target.value)}
+                  className={fieldClass}
+                />
               </label>
               <label className="flex flex-1 flex-col gap-1">
                 <span className="text-xs font-medium text-zinc-600">期限</span>
@@ -590,6 +614,9 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string>();
+  // Current project for new tasks (the default project until the switcher lands
+  // in PR3), so a new task's project_id is never left null (要確認-10).
+  const [defaultProjectId, setDefaultProjectId] = useState<string | null>(null);
 
   // Comments, grouped by task id. Loaded once on mount.
   const [commentsByTask, setCommentsByTask] = useState<
@@ -612,6 +639,7 @@ export default function TasksPage() {
   const [title, setTitle] = useState("");
   const [bulkText, setBulkText] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
+  const [startDate, setStartDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [parentId, setParentId] = useState<string>("");
@@ -679,6 +707,11 @@ export default function TasksPage() {
     listMembers()
       .then(setMembers)
       .catch((err) => console.error("メンバー一覧の読み込みに失敗:", err));
+
+    // The default project new tasks are attached to (until the PR3 switcher).
+    getDefaultProjectId()
+      .then(setDefaultProjectId)
+      .catch((err) => console.error("案件の読み込みに失敗:", err));
   }, []);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
@@ -703,6 +736,11 @@ export default function TasksPage() {
       );
       return;
     }
+    // Start date must not be after the due date (要確認-4 / PR2).
+    if (startDate && dueDate && startDate > dueDate) {
+      setError("開始日は期限より前にしてください。");
+      return;
+    }
     setSaving(true);
     try {
       if (bulkMode) {
@@ -725,11 +763,13 @@ export default function TasksPage() {
         }
         const shared = {
           assigneeId: assigneeId || null,
+          startDate,
           dueDate,
           status,
           priority,
           taskType: taskType || null,
           estimatedHours: estimatedHours.trim() ? Number(estimatedHours) : null,
+          projectId: defaultProjectId,
         };
         const created: Task[] = [];
         for (const group of groups) {
@@ -756,18 +796,21 @@ export default function TasksPage() {
         const created = await createTask({
           title: title.trim(),
           assigneeId: assigneeId || null,
+          startDate,
           dueDate,
           status,
           priority,
           taskType: taskType || null,
           estimatedHours: estimatedHours.trim() ? Number(estimatedHours) : null,
           parentId: parentId || null,
+          projectId: defaultProjectId,
         });
         setTasks((prev) => [...prev, created]);
         setTitle("");
       }
       // Keep status/parent for quick repeated entry; clear the per-task fields.
       setAssigneeId("");
+      setStartDate("");
       setDueDate("");
       setTaskType("");
       setEstimatedHours("");
@@ -1154,6 +1197,22 @@ export default function TasksPage() {
             ダッシュボード
           </Link>
           <Link
+            href="/tasks/milestones"
+            aria-label="マイルストーン"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M6 3a1 1 0 0 1 1 1v1h11l-2 3 2 3H7v9a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Z" />
+            </svg>
+            マイルストーン
+          </Link>
+          <Link
             href="/tasks/mail"
             aria-label="メール共有の設定"
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
@@ -1309,8 +1368,8 @@ export default function TasksPage() {
             </label>
           )}
 
-          <div className="flex flex-col gap-4 sm:flex-row">
-            <label className="flex flex-1 flex-col gap-1">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <label className="flex flex-col gap-1">
               <span className="text-sm font-medium text-zinc-700">担当者</span>
               <select
                 value={assigneeId}
@@ -1324,6 +1383,16 @@ export default function TasksPage() {
                   </option>
                 ))}
               </select>
+            </label>
+
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-700">開始日</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className={inputClass}
+              />
             </label>
 
             <label className="flex flex-1 flex-col gap-1">

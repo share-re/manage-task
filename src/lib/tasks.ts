@@ -341,6 +341,10 @@ export type TaskEdit = {
   estimatedHours?: number | null;
   actualHours?: number | null;
   startDate?: string;
+  // Baseline is frozen once (see freezeBaseline): the caller passes these only
+  // to fill an as-yet-unfrozen baseline; an already-frozen one is never sent.
+  baselineStart?: string | null;
+  baselineDue?: string | null;
 };
 
 /**
@@ -365,10 +369,14 @@ export async function updateTask(id: string, edit: TaskEdit): Promise<Task> {
   if (edit.estimatedHours !== undefined)
     patch.estimated_hours = edit.estimatedHours;
   if (edit.actualHours !== undefined) patch.actual_hours = edit.actualHours;
-  // start_date only when provided. baseline_* and project_id are intentionally
-  // NOT touched here: baseline is the frozen original plan (要確認-4), and the
-  // project stays put until the project switcher (PR3) moves it.
+  // start_date only when provided. project_id is intentionally NOT touched here
+  // (the project switcher in PR3 moves it). baseline_* is written only to freeze
+  // a still-empty baseline (see freezeBaseline); an already-frozen one is never
+  // sent by the caller, so a replan can't move the lightning-line target.
   if (edit.startDate !== undefined) patch.start_date = edit.startDate || null;
+  if (edit.baselineStart !== undefined)
+    patch.baseline_start = edit.baselineStart;
+  if (edit.baselineDue !== undefined) patch.baseline_due = edit.baselineDue;
 
   const { data, error } = await supabase
     .from("tasks")
@@ -513,4 +521,22 @@ export function estimateAchievement(
   }
   if (count === 0 || act <= 0) return null;
   return { ratio: est / act, count };
+}
+
+/**
+ * Freeze-once baseline (要確認-4 / PR2 整合性修正): compute which baseline fields
+ * to fill on save. Only an *empty* baseline is filled — from the current
+ * start/due — so a task created without dates, then dated later, still gets a
+ * baseline; an already-frozen baseline is left alone (never overwritten by a
+ * replan). Returns just the fields to set, ready to spread into a TaskEdit.
+ */
+export function freezeBaseline(
+  task: { baseline_start: string | null; baseline_due: string | null },
+  startDate: string | null | undefined,
+  dueDate: string | null | undefined,
+): { baselineStart?: string; baselineDue?: string } {
+  const out: { baselineStart?: string; baselineDue?: string } = {};
+  if (task.baseline_start == null && startDate) out.baselineStart = startDate;
+  if (task.baseline_due == null && dueDate) out.baselineDue = dueDate;
+  return out;
 }

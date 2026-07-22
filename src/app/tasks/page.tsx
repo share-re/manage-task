@@ -14,14 +14,20 @@ import {
   taskProgress,
   updateTask,
   updateTaskStatus,
+  completeTask,
   STATUS_META,
   STATUS_ORDER,
   PRIORITY_META,
   PRIORITY_ORDER,
+  TASK_TYPE_META,
+  TASK_TYPE_ORDER,
+  DIFFICULTY_META,
+  difficultyFromEstimate,
   type Task,
   type TaskEdit,
   type TaskStatus,
   type TaskPriority,
+  type TaskType,
 } from "@/lib/tasks";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
@@ -126,6 +132,15 @@ function TaskRow({
   const [eDue, setEDue] = useState(task.due_date ?? "");
   const [eStatus, setEStatus] = useState<TaskStatus>(task.status);
   const [ePriority, setEPriority] = useState<TaskPriority>(task.priority);
+  const [eTaskType, setETaskType] = useState<TaskType | "">(
+    task.task_type ?? "",
+  );
+  const [eEstimatedHours, setEEstimatedHours] = useState<string>(
+    task.estimated_hours != null ? String(task.estimated_hours) : "",
+  );
+  const [eActualHours, setEActualHours] = useState<string>(
+    task.actual_hours != null ? String(task.actual_hours) : "",
+  );
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string>();
 
@@ -138,6 +153,13 @@ function TaskRow({
     setEDue(task.due_date ?? "");
     setEStatus(task.status);
     setEPriority(task.priority);
+    setETaskType(task.task_type ?? "");
+    setEEstimatedHours(
+      task.estimated_hours != null ? String(task.estimated_hours) : "",
+    );
+    setEActualHours(
+      task.actual_hours != null ? String(task.actual_hours) : "",
+    );
     setEditError(undefined);
     setEditing(true);
   }
@@ -148,6 +170,11 @@ function TaskRow({
       setEditError("タイトルを入力してください。");
       return;
     }
+    // Completing a leaf requires its actual hours (Phase 1 rule).
+    if (eStatus === "done" && childCount === 0 && !eActualHours.trim()) {
+      setEditError("完了にするには実績時間を入力してください。");
+      return;
+    }
     setSavingEdit(true);
     try {
       await onSave(task.id, {
@@ -156,6 +183,9 @@ function TaskRow({
         dueDate: eDue,
         status: eStatus,
         priority: ePriority,
+        taskType: eTaskType || null,
+        estimatedHours: eEstimatedHours.trim() ? Number(eEstimatedHours) : null,
+        actualHours: eActualHours.trim() ? Number(eActualHours) : null,
       });
       setEditing(false);
     } catch {
@@ -339,6 +369,64 @@ function TaskRow({
                 </select>
               </label>
             </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">種別</span>
+                <select
+                  value={eTaskType}
+                  onChange={(e) => setETaskType(e.target.value as TaskType | "")}
+                  className={fieldClass}
+                >
+                  <option value="">種別なし</option>
+                  {TASK_TYPE_ORDER.map((t) => (
+                    <option key={t} value={t}>
+                      {TASK_TYPE_META[t].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">
+                  見積工数（時間・任意）
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={eEstimatedHours}
+                  onChange={(e) => setEEstimatedHours(e.target.value)}
+                  placeholder="例：6"
+                  className={fieldClass}
+                />
+                <span className="text-[11px] text-zinc-400">
+                  {(() => {
+                    const d = difficultyFromEstimate(
+                      eEstimatedHours.trim() ? Number(eEstimatedHours) : null,
+                    );
+                    return d
+                      ? `難易度：${DIFFICULTY_META[d].label}（自動）`
+                      : "難易度：未設定";
+                  })()}
+                </span>
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-600">
+                  実績時間（時間）
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={eActualHours}
+                  onChange={(e) => setEActualHours(e.target.value)}
+                  placeholder="完了時に入力"
+                  className={fieldClass}
+                />
+                <span className="text-[11px] text-zinc-400">
+                  完了にするには入力が必要です
+                </span>
+              </label>
+            </div>
             {editError && <p className="text-sm text-red-600">{editError}</p>}
             <div className="flex justify-end gap-2">
               <button
@@ -505,6 +593,8 @@ export default function TasksPage() {
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [parentId, setParentId] = useState<string>("");
   const [priority, setPriority] = useState<TaskPriority>("mid");
+  const [taskType, setTaskType] = useState<TaskType | "">("");
+  const [estimatedHours, setEstimatedHours] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
   // Filter / sort.
@@ -524,6 +614,11 @@ export default function TasksPage() {
   const [savedModal, setSavedModal] = useState(false);
   // The task pending deletion (opens a centered confirm dialog); null = closed.
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  // Leaf task pending completion — opens a dialog that requires actual hours.
+  const [completionTarget, setCompletionTarget] = useState<Task | null>(null);
+  const [completionHours, setCompletionHours] = useState("");
+  const [completionError, setCompletionError] = useState<string>();
+  const [completingBusy, setCompletingBusy] = useState(false);
   // Which archived parent tasks are expanded to reveal their completed children.
   const [expandedArchive, setExpandedArchive] = useState<Set<string>>(
     new Set(),
@@ -578,6 +673,13 @@ export default function TasksPage() {
       setError("期限に過去の日付は指定できません。");
       return;
     }
+    // Registering directly as "done" would bypass the actual-hours requirement.
+    if (status === "done") {
+      setError(
+        "「完了」での登録はできません。登録後に一覧から完了してください（実績時間の入力が必要です）。",
+      );
+      return;
+    }
     setSaving(true);
     try {
       if (bulkMode) {
@@ -598,7 +700,14 @@ export default function TasksPage() {
           setSaving(false);
           return;
         }
-        const shared = { assigneeId: assigneeId || null, dueDate, status, priority };
+        const shared = {
+          assigneeId: assigneeId || null,
+          dueDate,
+          status,
+          priority,
+          taskType: taskType || null,
+          estimatedHours: estimatedHours.trim() ? Number(estimatedHours) : null,
+        };
         const created: Task[] = [];
         for (const group of groups) {
           const parent = await createTask({
@@ -627,6 +736,8 @@ export default function TasksPage() {
           dueDate,
           status,
           priority,
+          taskType: taskType || null,
+          estimatedHours: estimatedHours.trim() ? Number(estimatedHours) : null,
           parentId: parentId || null,
         });
         setTasks((prev) => [...prev, created]);
@@ -635,6 +746,8 @@ export default function TasksPage() {
       // Keep status/parent for quick repeated entry; clear the per-task fields.
       setAssigneeId("");
       setDueDate("");
+      setTaskType("");
+      setEstimatedHours("");
     } catch (err) {
       console.error(err);
       setError("登録に失敗しました。時間をおいて再度お試しください。");
@@ -643,46 +756,53 @@ export default function TasksPage() {
     }
   }
 
+  // Parent auto-archive/reopen after a child's status changes: when every child
+  // is done, archive the parent; when a child is reopened, bring it back.
+  async function syncParentAfterChange(childId: string, childNext: TaskStatus) {
+    const changed = tasks.find((t) => t.id === childId);
+    if (!changed?.parent_id) return;
+    const parentId = changed.parent_id;
+    const parent = tasks.find((t) => t.id === parentId);
+    const siblings = tasks.filter((t) => t.parent_id === parentId);
+    const allDone = siblings.every(
+      (t) => (t.id === childId ? childNext : t.status) === "done",
+    );
+    if (parent && allDone && parent.status !== "done") {
+      await updateTaskStatus(parentId, "done");
+      setTasks((ts) =>
+        ts.map((t) =>
+          t.id === parentId
+            ? { ...t, status: "done", completed_at: new Date().toISOString() }
+            : t,
+        ),
+      );
+    } else if (parent && !allDone && parent.status === "done") {
+      await updateTaskStatus(parentId, "todo");
+      setTasks((ts) =>
+        ts.map((t) =>
+          t.id === parentId ? { ...t, status: "todo", completed_at: null } : t,
+        ),
+      );
+    }
+  }
+
   async function handleStatusChange(id: string, next: TaskStatus) {
+    const task = tasks.find((t) => t.id === id);
+    const isLeaf = !tasks.some((t) => t.parent_id === id);
+    // Completing a leaf requires its actual hours first — open the dialog
+    // instead of completing now (parents auto-complete, so no prompt for them).
+    if (next === "done" && task && isLeaf && task.actual_hours == null) {
+      setCompletionHours("");
+      setCompletionError(undefined);
+      setCompletionTarget(task);
+      return;
+    }
     // Optimistic update; roll back only this row on failure.
-    const previous = tasks.find((t) => t.id === id)?.status;
+    const previous = task?.status;
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status: next } : t)));
     try {
       await updateTaskStatus(id, next);
-      // Auto-sync the parent: when every child is done, archive the parent;
-      // when a child is reopened, bring the parent back out of the archive.
-      const changed = tasks.find((t) => t.id === id);
-      if (changed?.parent_id) {
-        const parentId = changed.parent_id;
-        const parent = tasks.find((t) => t.id === parentId);
-        const siblings = tasks.filter((t) => t.parent_id === parentId);
-        const allDone = siblings.every(
-          (t) => (t.id === id ? next : t.status) === "done",
-        );
-        if (parent && allDone && parent.status !== "done") {
-          await updateTaskStatus(parentId, "done");
-          setTasks((ts) =>
-            ts.map((t) =>
-              t.id === parentId
-                ? {
-                    ...t,
-                    status: "done",
-                    completed_at: new Date().toISOString(),
-                  }
-                : t,
-            ),
-          );
-        } else if (parent && !allDone && parent.status === "done") {
-          await updateTaskStatus(parentId, "todo");
-          setTasks((ts) =>
-            ts.map((t) =>
-              t.id === parentId
-                ? { ...t, status: "todo", completed_at: null }
-                : t,
-            ),
-          );
-        }
-      }
+      await syncParentAfterChange(id, next);
     } catch (err) {
       console.error(err);
       if (previous !== undefined) {
@@ -691,6 +811,42 @@ export default function TasksPage() {
         );
       }
       setError("状態の更新に失敗しました。");
+    }
+  }
+
+  // Confirm the completion dialog: record actual hours and mark the leaf done.
+  async function confirmCompletion() {
+    const task = completionTarget;
+    if (!task) return;
+    const hours = Number(completionHours);
+    if (!completionHours.trim() || !Number.isFinite(hours) || hours < 0) {
+      setCompletionError("実績時間（0以上の数値）を入力してください。");
+      return;
+    }
+    setCompletingBusy(true);
+    const previous = task.status;
+    const nowIso = new Date().toISOString();
+    setTasks((ts) =>
+      ts.map((t) =>
+        t.id === task.id
+          ? { ...t, status: "done", actual_hours: hours, completed_at: nowIso }
+          : t,
+      ),
+    );
+    try {
+      await completeTask(task.id, hours);
+      await syncParentAfterChange(task.id, "done");
+      setCompletionTarget(null);
+    } catch (err) {
+      console.error(err);
+      setTasks((ts) =>
+        ts.map((t) => (t.id === task.id ? { ...t, status: previous } : t)),
+      );
+      setCompletionError(
+        "完了の保存に失敗しました。時間をおいて再度お試しください。",
+      );
+    } finally {
+      setCompletingBusy(false);
     }
   }
 
@@ -1255,7 +1411,9 @@ export default function TasksPage() {
                 onChange={(e) => setStatus(e.target.value as TaskStatus)}
                 className={inputClass}
               >
-                {STATUS_ORDER.map((s) => (
+                {/* "完了" is excluded: completing requires actual hours, so a task
+                    is completed from the list/edit, not registered as done. */}
+                {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
                   <option key={s} value={s}>
                     {STATUS_META[s].label}
                   </option>
@@ -1276,6 +1434,48 @@ export default function TasksPage() {
                   </option>
                 ))}
               </select>
+            </label>
+          </div>
+
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-700">種別</span>
+              <select
+                value={taskType}
+                onChange={(e) => setTaskType(e.target.value as TaskType | "")}
+                className={inputClass}
+              >
+                <option value="">種別なし</option>
+                {TASK_TYPE_ORDER.map((t) => (
+                  <option key={t} value={t}>
+                    {TASK_TYPE_META[t].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm font-medium text-zinc-700">
+                見積工数（時間・任意）
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={estimatedHours}
+                onChange={(e) => setEstimatedHours(e.target.value)}
+                placeholder="例：6"
+                className={inputClass}
+              />
+              <span className="text-xs text-zinc-400">
+                {(() => {
+                  const d = difficultyFromEstimate(
+                    estimatedHours.trim() ? Number(estimatedHours) : null,
+                  );
+                  return d
+                    ? `難易度：${DIFFICULTY_META[d].label}（自動判定）`
+                    : "難易度：未設定（見積りを入れると自動で決まります）";
+                })()}
+              </span>
             </label>
           </div>
 
@@ -1387,6 +1587,72 @@ export default function TasksPage() {
           </ul>
         )}
       </section>
+
+      {/* Completion dialog: a leaf task requires its actual hours to be done. */}
+      {completionTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => !completingBusy && setCompletionTarget(null)}
+        >
+          <div
+            className="flex w-full max-w-xs flex-col gap-3 rounded-2xl bg-white px-6 py-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-base font-medium text-zinc-900">
+              実績時間を入力して完了
+            </p>
+            <p className="text-sm text-zinc-600">
+              「{completionTarget.title}」を完了にします。かかった時間（実績）を入力してください。
+            </p>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-zinc-600">
+                実績時間（時間）
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                autoFocus
+                value={completionHours}
+                onChange={(e) => {
+                  setCompletionHours(e.target.value);
+                  setCompletionError(undefined);
+                }}
+                placeholder="例：3"
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              />
+              {completionTarget.estimated_hours != null && (
+                <span className="text-[11px] text-zinc-400">
+                  見積り：{completionTarget.estimated_hours} 時間
+                </span>
+              )}
+            </label>
+            {completionError && (
+              <p className="text-sm text-red-600">{completionError}</p>
+            )}
+            <div className="mt-1 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCompletionTarget(null)}
+                disabled={completingBusy}
+                className="rounded-lg border border-zinc-300 px-4 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={confirmCompletion}
+                disabled={completingBusy || !completionHours.trim()}
+                className="rounded-lg bg-[#3B6D11] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#2f5a0e] disabled:opacity-50"
+              >
+                {completingBusy ? "保存中…" : "完了する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Centered confirmation after an edit is saved. */}
       {savedModal && (

@@ -20,10 +20,14 @@ const KNOWLEDGE_DIR = path.join(process.cwd(), "docs", "knowledge");
 const EMBED_MODEL = "gemini-embedding-001";
 // Must match vector(768) in scripts/sql/knowledge.sql.
 const EMBED_DIMS = 768;
-// Texts per embedding request / pause between requests: stay well under the
-// free-tier rate limits (NFR-Q2-02).
-const EMBED_BATCH = 20;
-const BATCH_PAUSE_MS = 2000;
+// Texts per embedding request / pause between requests. The free tier caps
+// embeddings at ~30k tokens/min (TPM), so we keep each request small and
+// space them out to stay under it: 10 chunks (~10k tokens) every 30s is
+// ~20k tokens/min. Sending faster only gets requests rejected with 429 —
+// and rejected requests still burn the 1,000/day quota, which is how a run
+// can drain the daily budget without finishing (NFR-Q2-02).
+const EMBED_BATCH = 10;
+const BATCH_PAUSE_MS = 30_000;
 // The free tier throttles tokens per minute; the 30s-wait retry loop is what
 // actually paces the run, so be patient before giving up.
 const MAX_RETRIES = 6;

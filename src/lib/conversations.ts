@@ -78,6 +78,21 @@ export async function getMessages(
   return (data ?? []) as StoredMessage[];
 }
 
+// messages テーブルの「全体の件数」と「しきい値」。DB の messages_status() が返す。
+export type MessagesStatus = {
+  total: number; // 全ユーザー合計の件数
+  warn_threshold: number; // これ以上で警告（例：400）
+  hard_limit: number; // これを超えると古い会話が自動削除（例：450）
+};
+
+// 全体の件数を取りに行く（RLSを越える窓口 messages_status を RPC で呼ぶ）。
+// これで「自分の分だけ」ではなく「全体の件数」が分かる。
+export async function getMessagesStatus(): Promise<MessagesStatus> {
+  const { data, error } = await supabase.rpc("messages_status");
+  if (error) throw error;
+  return data as MessagesStatus;
+}
+
 // 会話を削除する。ぶら下がる messages は on delete cascade で一緒に消える（段階4で使う）。
 export async function deleteConversation(
   conversationId: string,

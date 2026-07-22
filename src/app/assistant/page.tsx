@@ -15,7 +15,9 @@ import {
   listConversations,
   getMessages,
   deleteConversation,
+  getMessagesStatus,
   type Conversation,
+  type MessagesStatus,
 } from "@/lib/conversations";
 
 // 検索の裏取りに使った参照元（出典）1件分。
@@ -61,6 +63,7 @@ export default function AssistantPage() {
   // 保存中の会話ID。最初の送信で会話を作り、以降はこの会話に発言を足していく。
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]); // 履歴一覧
+  const [status, setStatus] = useState<MessagesStatus | null>(null); // 全体の保存件数（警告バナー用）
   const [sidebarOpen, setSidebarOpen] = useState(false); // スマホ用サイドバー（履歴）の開閉
   const [saveEnabled, setSaveEnabled] = useState(true); // この会話を保存するか（プライバシー）
   const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
@@ -98,9 +101,21 @@ export default function AssistantPage() {
       .catch((e) => console.error("会話一覧の取得に失敗:", e));
   }
 
-  // ログインできたら、保存済みの会話一覧を読み込む（履歴パネル用）。
+  // 全体の保存件数を取り直す（警告バナー用）。
+  // ※ まだ DB 側に messages_status を作っていない場合はエラーになるが、
+  //   バナーを出さないだけでチャットは普通に使えるよう、握りつぶしてログだけ残す。
+  function refreshStatus() {
+    return getMessagesStatus()
+      .then(setStatus)
+      .catch((e) => console.error("保存件数の取得に失敗:", e));
+  }
+
+  // ログインできたら、保存済みの会話一覧と全体件数を読み込む。
   useEffect(() => {
-    if (session) refreshConversations();
+    if (session) {
+      refreshConversations();
+      refreshStatus();
+    }
   }, [session]);
 
   // 返答をクリップボードにコピー（HTTPS / localhost でのみ動く）。
@@ -326,6 +341,7 @@ export default function AssistantPage() {
         } catch (e) {
           console.error("会話の保存に失敗:", e);
         }
+        void refreshStatus(); // 件数が増えた（＝古い会話が消えたかも）ので取り直す
       }
 
       // 停止で中断したときは「応答なし」を出さない。
@@ -568,6 +584,15 @@ export default function AssistantPage() {
           </p>
         </div>
       </header>
+
+      {/* 保存件数の警告バナー。全体が warn_threshold(400)件以上のときだけ出す。
+          hard_limit(450)件を超えると古い会話が自動削除される旨を伝える。 */}
+      {status && status.total >= status.warn_threshold && (
+        <div className="mb-3 rounded-xl bg-amber-50 px-4 py-2 text-xs text-amber-800 ring-1 ring-amber-300">
+          ⚠️ 会話の保存件数が上限に近づいています（{status.total}／{status.hard_limit}件）。
+          {status.hard_limit}件を超えると、古い会話から自動的に削除されます。
+        </div>
+      )}
 
       {/* 会話エリア（ここだけスクロール） */}
       <div

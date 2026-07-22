@@ -6,6 +6,11 @@
 //   - a file's rows are replaced on every run (no duplicates),
 //   - rows of deleted files are removed.
 //
+// Pass --skip-existing (npm run ingest -- --skip-existing) to resume a run
+// that hit the daily quota partway: files already in the DB are left as-is
+// and only missing files are embedded. It skips by filename only, so after
+// EDITING a file's contents, re-run WITHOUT the flag to re-embed it.
+//
 // Run with: npm run ingest
 // Required env (.env.local): NEXT_PUBLIC_SUPABASE_URL,
 //   SUPABASE_SERVICE_ROLE_KEY (writes bypass RLS), GEMINI_API_KEY.
@@ -82,10 +87,27 @@ async function main() {
     console.log(`No .md files under ${KNOWLEDGE_DIR} - nothing to do.`);
   }
 
+  // --skip-existing: resume mode. Skip files already in the DB (matched by
+  // filename) so a run interrupted by the daily quota can finish the rest
+  // without re-embedding what is already there. Default stays full-mirror.
+  const skipExisting = process.argv.includes("--skip-existing");
+
+  // Files already present in the DB. One query, reused for the resume skip
+  // above and for the stale-file cleanup at the end.
+  const existing = await supabase.from("knowledge").select("source_file");
+  if (existing.error) throw new Error(`select failed: ${existing.error.message}`);
+  const ingestedFiles = new Set(existing.data.map((r) => r.source_file as string));
+
+  let skipped = 0;
   let totalChunks = 0;
   let totalChars = 0;
 
   for (const file of files) {
+    if (skipExisting && ingestedFiles.has(file)) {
+      console.log(`${file}: already in DB, skipping (--skip-existing)`);
+      skipped++;
+      continue;
+    }
     const markdown = await readFile(path.join(KNOWLEDGE_DIR, file), "utf8");
     const chunks = chunkMarkdown(markdown);
     console.log(`${file}: ${chunks.length} chunks`);
@@ -121,12 +143,9 @@ async function main() {
     totalChars += chunks.reduce((n, c) => n + c.content.length, 0);
   }
 
-  // Drop rows whose source file no longer exists (mirror semantics).
-  const existing = await supabase.from("knowledge").select("source_file");
-  if (existing.error) throw new Error(`select failed: ${existing.error.message}`);
-  const stale = [...new Set(existing.data.map((r) => r.source_file as string))].filter(
-    (f) => !files.includes(f),
-  );
+  // Drop rows whose source file no longer exists (mirror semantics). Reuses
+  // the ingestedFiles snapshot taken at the start of the run.
+  const stale = [...ingestedFiles].filter((f) => !files.includes(f));
   if (stale.length > 0) {
     console.log(`removing rows of deleted files: ${stale.join(", ")}`);
     const del = await supabase.from("knowledge").delete().in("source_file", stale);
@@ -134,7 +153,8 @@ async function main() {
   }
 
   console.log(
-    `done: ${files.length} files, ${totalChunks} chunks, ~${Math.round(totalChars / 1000)}k chars embedded`,
+    `done: ${files.length} files (${skipped} skipped), ${totalChunks} chunks, ` +
+      `~${Math.round(totalChars / 1000)}k chars embedded`,
   );
 }
 

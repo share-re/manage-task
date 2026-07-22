@@ -3,6 +3,7 @@ import { UCHIDA_SYSTEM_PROMPT } from "@/lib/uchidaPrompt";
 import { parseQuotaError } from "@/lib/geminiQuota";
 import { withInternalInfoGuard } from "@/lib/internalInfoGuard";
 import { getUserFromRequest } from "@/lib/serverAuth";
+import { searchKnowledge } from "@/lib/knowledgeSearch";
 
 // このAPIはサーバ側で動かす（鍵をブラウザに出さないため）。
 // Edgeランタイムだと不具合が出やすいので Node を明示する。
@@ -87,9 +88,35 @@ export async function POST(req: Request) {
     const ai = new GoogleGenAI({ apiKey });
 
     // 名前が分かっていれば、人格プロンプトの末尾に「今の相手」を1行足す。
-    const systemInstruction = userName
+    const basePrompt = userName
       ? `${UCHIDA_SYSTEM_PROMPT}\n\n# 今話している相手\n相手の表示名は「${userName}」です。この名前で呼びかけてください（呼び方ルールに従い、性別が不明なら「${userName}さん」）。`
       : UCHIDA_SYSTEM_PROMPT;
+
+    // 社内資料の検索（#77 RAG）。関連が十分なチャンクだけが返る。
+    // 該当なし・検索失敗のときは空＝何も添えず従来どおり応答する（FR-Q2-04）。
+    const knowledge = await searchKnowledge(ai, message);
+    const knowledgeBlock =
+      knowledge.length > 0
+        ? "\n\n# 社内資料（参考）\n" +
+          "以下は社内の資料からの抜粋で、今回の発言と関連が高いと判定されたもの。\n" +
+          "回答の根拠になる場合だけ使い、無関係なら黙って無視すること（無関係なら下の2段構えもしない）。\n" +
+          "\n" +
+          "## この資料を使って答えるときの組み立て方（#82 一般論→内田論）\n" +
+          "資料が今回の相談の根拠になるときは、回答を2段構えにする：\n" +
+          "1段目：まず一般的にはどうか、を短く説明する。\n" +
+          "2段目：続けて『で、うちの場合はね』『私の考えとしては』のように自然につなぎ、" +
+          "資料に基づく“この会社／内田さんならではの見方”を話す。\n" +
+          "- 2段目で述べる事実は、必ず上の資料の内容に忠実にする。資料に無いことを、" +
+          "資料にあるかのように語らない。資料に無い体験談を作らない。\n" +
+          "- 言い回し・たとえは内田さんらしくしてよいが、1段目と2段目で同じことを繰り返さない。\n" +
+          "- 見出し記号（##）は付けず、地の文で自然に2段に分ける。長くなりすぎないこと。\n" +
+          "\n" +
+          "## 資料本文\n" +
+          knowledge
+            .map((k) => `### ${k.heading || k.sourceFile}\n${k.content}`)
+            .join("\n\n")
+        : "";
+    const systemInstruction = basePrompt + knowledgeBlock;
 
     // 人格プロンプトを systemInstruction（土台の指示）として渡し、履歴も渡す。
     const chat = ai.chats.create({
@@ -126,8 +153,18 @@ export async function POST(req: Request) {
           }
           // 本文を流し切ったあと、出典があれば「区切り記号＋JSON」を末尾に付ける。
           // 画面側はこの区切り記号で、本文と出典を切り分ける。
-          const meta = buildSourcesMeta(grounding);
-          if (meta) {
+          // 社内資料（internal）は Web の出典と別フィールドにして、画面で区別できるようにする。
+          const webMeta = buildSourcesMeta(grounding);
+          const internal = [
+            ...new Map(
+              knowledge.map((k) => [
+                `${k.sourceFile}\n${k.heading}`,
+                { file: k.sourceFile, heading: k.heading },
+              ]),
+            ).values(),
+          ];
+          if (webMeta || internal.length > 0) {
+            const meta = { ...(webMeta ?? { sources: [], suggestions: "" }), internal };
             controller.enqueue(encoder.encode(SOURCES_SEP + JSON.stringify(meta)));
           }
         } catch (err) {

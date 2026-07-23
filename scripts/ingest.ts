@@ -1,19 +1,25 @@
 // Knowledge ingest for the AI assistant (issue #77).
 //
-// Reads every Markdown file under docs/knowledge/, splits them into chunks,
-// embeds each chunk with the Gemini embedding API and syncs the result into
-// the Supabase "knowledge" table. The sync is full-mirror (FR-Q2-02):
-//   - a file's rows are replaced on every run (no duplicates),
+// Reads every Markdown file under docs/knowledge/, splits them into chunks
+// and syncs them into the Supabase "knowledge" table, keyed by file name
+// (source_file). The sync is full-mirror (FR-Q2-02):
+//   - a file's rows are replaced on every run (idempotent: two consecutive
+//     runs yield identical tables),
 //   - rows of deleted files are removed.
 //
-// Pass --skip-existing (npm run ingest -- --skip-existing) to resume a run
-// that hit the daily quota partway: files already in the DB are left as-is
-// and only missing files are embedded. It skips by filename only, so after
-// EDITING a file's contents, re-run WITHOUT the flag to re-embed it.
+// Default mode is keyword (FR-Q2-04): chunks are stored as plain text and
+// the embedding API is never called, so runs are fast and unaffected by
+// the 1,000/day embedding free-tier cap.
 //
-// Run with: npm run ingest
+// Pass --embed to also embed each chunk (vector add-on, requirements §2.1).
+// Pass --skip-existing to resume an --embed run that hit the daily quota
+// partway: files already in the DB are left as-is (matched by filename
+// only), so after EDITING a file's contents re-run WITHOUT the flag.
+//
+// Run with: npm run ingest [-- --embed] [-- --skip-existing]
 // Required env (.env.local): NEXT_PUBLIC_SUPABASE_URL,
-//   SUPABASE_SERVICE_ROLE_KEY (writes bypass RLS), GEMINI_API_KEY.
+//   SUPABASE_SERVICE_ROLE_KEY (writes bypass RLS); GEMINI_API_KEY is only
+//   needed with --embed.
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -77,7 +83,10 @@ async function main() {
     requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
     { auth: { persistSession: false } },
   );
-  const ai = new GoogleGenAI({ apiKey: requiredEnv("GEMINI_API_KEY") });
+  // --embed: vector add-on mode. The default (keyword) stores plain text
+  // and never touches the embedding API or its daily quota.
+  const embedMode = process.argv.includes("--embed");
+  const ai = embedMode ? new GoogleGenAI({ apiKey: requiredEnv("GEMINI_API_KEY") }) : null;
 
   // Collect .md files (paths relative to docs/knowledge/, "/"-separated so
   // the DB key is OS-independent).
@@ -112,16 +121,19 @@ async function main() {
     const chunks = chunkMarkdown(markdown);
     console.log(`${file}: ${chunks.length} chunks`);
 
-    // Embed heading + body so the vector carries the section context too.
+    // --embed only: heading + body per chunk, so the vector carries the
+    // section context too. Keyword mode stores plain text and skips this.
     const vectors: number[][] = [];
-    for (let i = 0; i < chunks.length; i += EMBED_BATCH) {
-      const batch = chunks.slice(i, i + EMBED_BATCH);
-      const texts = batch.map((c) => (c.heading ? `${c.heading}\n\n${c.content}` : c.content));
-      vectors.push(...(await embedBatch(ai, texts)));
-      process.stdout.write(`  embedded ${Math.min(i + EMBED_BATCH, chunks.length)}/${chunks.length}\r`);
-      if (i + EMBED_BATCH < chunks.length) await sleep(BATCH_PAUSE_MS);
+    if (embedMode && ai) {
+      for (let i = 0; i < chunks.length; i += EMBED_BATCH) {
+        const batch = chunks.slice(i, i + EMBED_BATCH);
+        const texts = batch.map((c) => (c.heading ? `${c.heading}\n\n${c.content}` : c.content));
+        vectors.push(...(await embedBatch(ai, texts)));
+        process.stdout.write(`  embedded ${Math.min(i + EMBED_BATCH, chunks.length)}/${chunks.length}\r`);
+        if (i + EMBED_BATCH < chunks.length) await sleep(BATCH_PAUSE_MS);
+      }
+      console.log("");
     }
-    console.log("");
 
     // Replace this file's rows: delete then insert (idempotent re-run).
     const del = await supabase.from("knowledge").delete().eq("source_file", file);
@@ -132,7 +144,9 @@ async function main() {
       heading: c.heading,
       chunk_index: i,
       content: c.content,
-      embedding: vectors[i],
+      // null in keyword mode (scripts/sql/knowledge_keyword.sql makes the
+      // column nullable); filled only by the --embed vector add-on.
+      embedding: embedMode ? vectors[i] : null,
     }));
     for (let i = 0; i < rows.length; i += INSERT_BATCH) {
       const ins = await supabase.from("knowledge").insert(rows.slice(i, i + INSERT_BATCH));
@@ -154,7 +168,7 @@ async function main() {
 
   console.log(
     `done: ${files.length} files (${skipped} skipped), ${totalChunks} chunks, ` +
-      `~${Math.round(totalChars / 1000)}k chars embedded`,
+      `~${Math.round(totalChars / 1000)}k chars ${embedMode ? "embedded" : "stored (keyword mode)"}`,
   );
 }
 

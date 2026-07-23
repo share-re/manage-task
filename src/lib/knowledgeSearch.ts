@@ -1,7 +1,7 @@
 import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import { getSupabaseAdmin } from "./supabaseAdmin";
-import { extractKeywords } from "./knowledgeKeywords";
+import { countTermOccurrences, extractKeywords } from "./knowledgeKeywords";
 
 // Knowledge retrieval for the assistant (issue #77).
 //
@@ -26,6 +26,9 @@ export type KnowledgeHit = {
 
 // Max chunks per reply (requirements §11 #4): 4 × ~1000 chars ≈ +4k tokens.
 const MAX_CHUNKS = 4;
+// Fetch more candidates than we keep, so the occurrence-count re-rank below
+// has something to choose from (SQL only ranks by distinct terms matched).
+const FETCH_CANDIDATES = 8;
 // A chunk is adopted when it contains at least this many distinct query
 // terms (§11 #8). Queries that only yield one term require that one.
 const MIN_MATCHES = 2;
@@ -38,7 +41,7 @@ export async function searchKnowledge(query: string): Promise<KnowledgeHit[]> {
 
     const { data, error } = await getSupabaseAdmin().rpc("match_knowledge_keyword", {
       query_terms: terms,
-      match_count: MAX_CHUNKS,
+      match_count: FETCH_CANDIDATES,
       min_matches: Math.min(MIN_MATCHES, terms.length),
     });
     if (error) {
@@ -46,12 +49,22 @@ export async function searchKnowledge(query: string): Promise<KnowledgeHit[]> {
       return [];
     }
     type Row = { source_file: string; heading: string; content: string; matches: number };
-    return ((data ?? []) as Row[]).map((r) => ({
-      sourceFile: r.source_file,
-      heading: r.heading,
-      content: r.content,
-      matches: r.matches,
+    // Re-rank: same distinct-term count → prefer the chunk that mentions the
+    // terms more often. Stops a table-of-contents chunk (one mention) from
+    // beating the actual section about the topic (observed in testing).
+    const scored = ((data ?? []) as Row[]).map((r) => ({
+      hit: {
+        sourceFile: r.source_file,
+        heading: r.heading,
+        content: r.content,
+        matches: r.matches,
+      },
+      occurrences: countTermOccurrences(`${r.heading}\n${r.content}`, terms),
     }));
+    scored.sort(
+      (a, b) => (b.hit.matches ?? 0) - (a.hit.matches ?? 0) || b.occurrences - a.occurrences,
+    );
+    return scored.slice(0, MAX_CHUNKS).map((s) => s.hit);
   } catch (err) {
     console.error("knowledge search failed:", err);
     return [];

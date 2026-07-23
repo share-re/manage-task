@@ -101,15 +101,13 @@ export async function POST(req: Request) {
           "以下は社内の資料からの抜粋で、今回の発言と関連が高いと判定されたもの。\n" +
           "回答の根拠になる場合だけ使い、無関係なら黙って無視すること（無関係なら下の指示も適用しない）。\n" +
           "\n" +
-          "## この資料を使って答えるときの出力形式（#82 一般論→内田論の2段構え）\n" +
-          "資料が今回の相談の根拠になるときは、回答を必ず次の2つの見出しだけで構成する。\n" +
-          "『## 一般論』：世間一般ではどう考えられているか。1〜3文で短く。\n" +
-          "『## 内田さんの考え』：資料に基づく内田さんならではの見方。こちらが本題で、" +
-          "ふだんの内田さんの口調のまま話す。\n" +
-          "- 見出しの文言はこのとおりにする（変えない・増やさない）。\n" +
-          "- 内田さんの考えで述べる事実は、必ず上の資料の内容に忠実にする。資料に無いことを、" +
+          "## この資料を使って答えるときの指示（#82：この回答は『内田さんの考え』パート）\n" +
+          "画面には先に『一般論』（別途生成済み）が表示され、あなたの回答は" +
+          "『内田さんの考え』という見出しの下に表示される（見出しはサーバが付けるので自分では書かない）。\n" +
+          "- 一般的な説明を繰り返さず、資料に基づく内田さんならではの見方を本題として話す。\n" +
+          "- 述べる事実は、必ず上の資料の内容に忠実にする。資料に無いことを、" +
           "資料にあるかのように語らない。資料に無い体験談を作らない。\n" +
-          "- 2つの節で同じことを繰り返さない。全体はふだんどおり簡潔に。\n" +
+          "- 見出し記号（##）は使わない。ふだんの口調・簡潔さは保つ。\n" +
           "\n" +
           "## 資料本文\n" +
           knowledge
@@ -117,6 +115,30 @@ export async function POST(req: Request) {
             .join("\n\n")
         : "";
     const systemInstruction = basePrompt + knowledgeBlock;
+
+    // 2段構えの1段目「一般論」（#82）。資料がヒットしたときだけ、先に短い一般論を
+    // 別呼び出しで作る。見出しの組み立てはモデルに任せず、サーバ側でコードとして行う
+    // （プロンプトでの形式指示はモデルが安定して守らなかったため、構造で保証する）。
+    // 失敗しても止めない：一般論なしで「内田さんの考え」だけの構成に縮退する。
+    let generalPart = "";
+    if (knowledge.length > 0) {
+      try {
+        const g = await ai.models.generateContent({
+          model,
+          contents: [...history, { role: "user", parts: [{ text: message }] }],
+          config: {
+            systemInstruction:
+              basePrompt +
+              "\n\n# 今回の出力指示\nこの相談について、世間一般ではどう考えられているか（一般論）だけを、" +
+              "内田さんの口調のまま1〜3文で簡潔に述べる。社内・研修の固有の話には触れない。" +
+              "見出し・前置き・呼びかけは書かず、本文だけを書く。",
+          },
+        });
+        generalPart = (g.text ?? "").trim();
+      } catch (err) {
+        console.error("general-part generation failed:", err);
+      }
+    }
 
     // 人格プロンプトを systemInstruction（土台の指示）として渡し、履歴も渡す。
     const chat = ai.chats.create({
@@ -141,6 +163,13 @@ export async function POST(req: Request) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        // 2段構えの骨組み（見出し）はサーバが出す（#82）。モデルの出力形式に依存しないため、
+        // 資料がヒットした回答は必ず「一般論／内田さんの考え」の2見出しになる。
+        if (knowledge.length > 0) {
+          const prefix =
+            (generalPart ? `## 一般論\n\n${generalPart}\n\n` : "") + "## 内田さんの考え\n\n";
+          controller.enqueue(encoder.encode(prefix));
+        }
         // 検索が走ったときの「出典情報」を、受信ループの中で拾っておく。
         let grounding: GroundingMetadata | undefined;
         try {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractKeywords } from "../../src/lib/knowledgeKeywords";
+import { countTermOccurrences, extractKeywords } from "../../src/lib/knowledgeKeywords";
 
 // extractKeywords is the deterministic half of keyword retrieval
 // (FR-Q2-04): terms in → terms out, no DB and no embedding involved.
@@ -35,5 +35,27 @@ describe("extractKeywords", () => {
 
   it("returns an empty array for empty input", () => {
     expect(extractKeywords("")).toEqual([]);
+  });
+});
+
+describe("countTermOccurrences", () => {
+  it("counts every occurrence of every term", () => {
+    const text = "ハーネスとは何か。ハーネスの部品。Hooks と hooks。";
+    expect(countTermOccurrences(text, ["ハーネス", "hooks"])).toBe(4);
+  });
+
+  it("returns 0 when no term appears", () => {
+    expect(countTermOccurrences("コーヒーの話", ["ハーネス"])).toBe(0);
+  });
+
+  it("ranks a topic section above a table of contents", () => {
+    // The observed failure: a TOC mentioning the term once outranked the
+    // actual section. With occurrence counting the section wins.
+    const toc = "1. ハーネスエンジニアリング 2. 自動化";
+    const section = "ハーネスエンジニアリングとは…ハーネスエンジニアリングの構成要素は…";
+    const terms = ["ハーネスエンジニアリング"];
+    expect(countTermOccurrences(section, terms)).toBeGreaterThan(
+      countTermOccurrences(toc, terms),
+    );
   });
 });

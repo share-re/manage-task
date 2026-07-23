@@ -19,3 +19,23 @@ export function extractKeywords(text: string): string[] {
   }
   return [...seen];
 }
+
+/**
+ * Counts how many times the terms appear in the text in total
+ * (case-insensitive for ASCII). Used as a tie-breaker when chunks match
+ * the same number of distinct terms: a chunk that mentions a term many
+ * times (the actual section about it) should beat one that mentions it
+ * once (e.g. a table of contents).
+ */
+export function countTermOccurrences(text: string, terms: string[]): number {
+  const lower = text.toLowerCase();
+  let total = 0;
+  for (const term of terms) {
+    let i = lower.indexOf(term);
+    while (i !== -1) {
+      total++;
+      i = lower.indexOf(term, i + term.length);
+    }
+  }
+  return total;
+}

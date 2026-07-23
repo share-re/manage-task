@@ -8,6 +8,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { supabase } from "@/lib/supabase";
 import ForestBackground from "@/components/ForestBackground";
 import UchidaIcon from "@/components/UchidaIcon";
+import UchidaAvatar3D from "@/components/UchidaAvatar3D";
 import {
   createConversation,
   addMessage,
@@ -49,6 +50,10 @@ const MAX_INPUT_HEIGHT = 128;
 // 直近の返答が辛いもの寄りの話題ならアバターのバッジを🌶に差し替える。単純な語句判定でよい。
 const SPICY_WORDS = /辛い|激辛|唐辛子|カレー|スパイス|麻婆|キムチ|ハバネロ/;
 
+// AI返答のMarkdown描画に使う共通スタイル（アバター画面とチャット画面の両方で使う）。
+const MD_STYLES =
+  " [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-200/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-bold [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-100 [&_pre]:p-3 [&_pre]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-bold [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5";
+
 export default function AssistantPage() {
   const { session } = useAuth();
   // 呼びかけ名はサーバ側が認証情報から解決するため、ここでは組み立てない（#76 / KI-03）。
@@ -65,6 +70,8 @@ export default function AssistantPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]); // 履歴一覧
   const [status, setStatus] = useState<MessagesStatus | null>(null); // 全体の保存件数（警告バナー用）
   const [sidebarOpen, setSidebarOpen] = useState(false); // スマホ用サイドバー（履歴）の開閉
+  // 画面モード。"avatar"=アバターがしゃべる画面（既定）／"chat"=吹き出し一覧（会話ログ・履歴用）。
+  const [view, setView] = useState<"avatar" | "chat">("avatar");
   const [saveEnabled, setSaveEnabled] = useState(true); // この会話を保存するか（プライバシー）
   const abortRef = useRef<AbortController | null>(null); // 生成中のリクエストを止める用
   const textareaRef = useRef<HTMLTextAreaElement>(null); // 入力欄。高さの自動調整に使う
@@ -376,6 +383,7 @@ export default function AssistantPage() {
       setConversationId(id);
       setSidebarOpen(false);
       setError(undefined);
+      setView("chat"); // 履歴はやりとり全体を読み返す場面なので、吹き出し一覧で開く
     } catch (e) {
       console.error("会話の読み込みに失敗:", e);
       setError("会話の読み込みに失敗しました。");
@@ -389,6 +397,7 @@ export default function AssistantPage() {
     setInput("");
     setSidebarOpen(false);
     setError(undefined);
+    setView("avatar"); // 新しい会話はアバター画面から始める
   }
 
   // 会話を削除する（確認あり）。開いている会話を消したら、表示もクリアする。
@@ -428,6 +437,11 @@ export default function AssistantPage() {
   const lastMsg = messages[messages.length - 1];
   const avatarBadge =
     !loading && lastMsg?.role === "model" && SPICY_WORDS.test(lastMsg.text) ? "chili" : "spark";
+
+  // アバター画面に出すのは「直前の自分の質問」と「最新のAI返答」だけ。
+  // （やりとり全体は「会話ログ」画面で見る）
+  const lastUserText = [...messages].reverse().find((m) => m.role === "user")?.text;
+  const lastReply = lastMsg?.role === "model" ? lastMsg : undefined;
 
   return (
     // このページだけ常にライト表示に固定（OSがダークでも反転させない）。
@@ -555,7 +569,25 @@ export default function AssistantPage() {
       </aside>
 
       <main className="relative z-10 flex h-[100dvh] min-w-0 flex-1 flex-col px-4 py-6">
-        <div className="mx-auto flex h-full w-full max-w-2xl flex-col">
+        {/* アバター画面では「アバター＋カード」を1組として中央に置く。
+            アバターはカードの左（履歴サイドバーとの間）に立つ。
+            横に並べる余白が作れない狭い画面(lg未満)では、カード内の小さい表示に切り替える。 */}
+        <div
+          className={
+            "mx-auto flex h-full w-full " +
+            (view === "avatar"
+              ? "max-w-2xl flex-col lg:max-w-[864px] lg:flex-row lg:gap-4 xl:max-w-[912px]"
+              : "max-w-2xl flex-col")
+          }
+        >
+          {view === "avatar" && (
+            <div className="hidden shrink-0 flex-col justify-end pb-14 lg:flex lg:w-44 xl:w-56">
+              <div className="h-[min(55vh,420px)]">
+                <UchidaAvatar3D size="fill" talking={loading} />
+              </div>
+            </div>
+          )}
+          <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* ヘッダー（白い半透明カード） */}
       <header className="mb-4 flex items-center gap-3 rounded-2xl bg-white/85 px-4 py-3 shadow-sm ring-1 ring-black/5 backdrop-blur">
         {/* スマホ：サイドバー（履歴）を開く */}
@@ -583,6 +615,15 @@ export default function AssistantPage() {
             内田さんをモデルにしたAIです（本人ではありません）
           </p>
         </div>
+        {/* 画面モードの切替。アバター画面 ⇄ 会話ログ（吹き出し一覧）。 */}
+        <button
+          type="button"
+          onClick={() => setView((v) => (v === "avatar" ? "chat" : "avatar"))}
+          title={view === "avatar" ? "やりとり全体を吹き出し一覧で見ます" : "アバターがしゃべる画面に戻ります"}
+          className="ml-auto shrink-0 rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-600/30 transition hover:bg-white"
+        >
+          {view === "avatar" ? "💬 会話ログ" : "🧑‍💼 アバター"}
+        </button>
       </header>
 
       {/* 保存件数の警告バナー。全体が warn_threshold(400)件以上のときだけ出す。
@@ -594,7 +635,111 @@ export default function AssistantPage() {
         </div>
       )}
 
-      {/* 会話エリア（ここだけスクロール） */}
+      {view === "avatar" ? (
+        /* アバター画面（既定）：左に3Dアバター、右に「直前の質問」と「最新の返答」の吹き出し。
+           やりとり全体を読み返すときはヘッダーの「会話ログ」で切り替える。 */
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-2xl bg-white/40 p-4 shadow-[0_8px_24px_-8px_rgba(16,185,129,0.28)] ring-1 ring-black/5 backdrop-blur">
+          {/* 画面が狭いとき(lg未満)だけ、カードの中に小さくアバターを出す。
+              広い画面ではカードの外（左の余白）に立つので、ここには出さない。 */}
+          <div className="h-40 shrink-0 lg:hidden">
+            <UchidaAvatar3D size="fill" talking={loading} />
+          </div>
+            {lastUserText && (
+              <div className="flex justify-end">
+                <span className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-emerald-600 px-3 py-1.5 text-xs text-white shadow-sm">
+                  {lastUserText}
+                </span>
+              </div>
+            )}
+            <div className="relative rounded-2xl bg-white/90 p-4 shadow-sm ring-1 ring-black/5">
+              {/* 吹き出しのしっぽ（しゃべっている内田さんの方を指す）。
+                  PC(lg以上)ではカードの左に立つアバターへ向けて左向き、
+                  狭い画面ではカード内上部のアバターへ向けて上向きに出す。
+                  ※カードはスクロール領域なので、はみ出し幅はパディング(16px)内に収めている。 */}
+              <svg
+                className="absolute -left-[14px] top-7 hidden lg:block"
+                width="16"
+                height="18"
+                viewBox="0 0 16 18"
+                aria-hidden
+              >
+                <path d="M16 0 C 10 8, 5 12, 0 14 C 7 16, 12 14, 16 12 Z" fill="rgb(255 255 255 / 0.9)" />
+              </svg>
+              <svg
+                className="absolute -top-3 left-1/2 -translate-x-1/2 lg:hidden"
+                width="18"
+                height="12"
+                viewBox="0 0 18 12"
+                aria-hidden
+              >
+                <path d="M0 12 C 6 9, 10 4, 12 0 C 14 6, 16 9, 18 12 Z" fill="rgb(255 255 255 / 0.9)" />
+              </svg>
+              {lastReply ? (
+                <>
+                  <div className={"text-sm text-zinc-900" + MD_STYLES}>
+                    <Markdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        // 本文中のリンクは新しいタブで開く（未保存の会話が消えるのを防ぐ）。
+                        a({ node, ...props }) {
+                          return <a {...props} target="_blank" rel="noreferrer" />;
+                        },
+                      }}
+                    >
+                      {lastReply.text}
+                    </Markdown>
+                  </div>
+                  {lastReply.sources && lastReply.sources.length > 0 && (
+                    <div className="mt-2 text-xs text-emerald-800/70">
+                      <p className="font-medium">参照</p>
+                      <ul className="list-disc pl-4">
+                        {lastReply.sources.map((s, k) => (
+                          <li key={k}>
+                            <a
+                              href={s.uri}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="underline hover:text-emerald-700"
+                            >
+                              {s.title || s.uri}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {lastReply.suggestions && (
+                    <div
+                      className="mt-2"
+                      dangerouslySetInnerHTML={{ __html: lastReply.suggestions }}
+                    />
+                  )}
+                  <div className="mt-1 flex items-center gap-2">
+                    {copyButton(lastReply.text, messages.length - 1)}
+                    {!loading && (
+                      <button
+                        type="button"
+                        onClick={retry}
+                        title="同じ質問を、いまのモードで答え直します"
+                        className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800 shadow-sm ring-1 ring-emerald-600/40 transition hover:bg-emerald-200"
+                      >
+                        🔄 考え直して
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : loading ? (
+                <p className="text-sm text-zinc-400">考え中…</p>
+              ) : (
+                <p className="text-sm text-emerald-800/70">
+                  気軽に相談してみましょう。「今どんな感じ？」から話しかけてくれてもOKです。
+                </p>
+              )}
+            </div>
+        </div>
+      ) : (
+      <>
+      {/* 会話ログ画面：吹き出し一覧（ここだけスクロール） */}
       <div
         ref={listRef}
         onScroll={onListScroll}
@@ -620,7 +765,7 @@ export default function AssistantPage() {
               <UchidaIcon size={24} className="mt-1 shrink-0" />
               <div className="flex min-w-0 flex-col items-start">
                 {/* Markdownを描画（生HTMLは描画しないので安全）。要素ごとの見た目はTailwindで指定。 */}
-                <div className="max-w-[80%] rounded-2xl bg-white/90 px-4 py-2 text-sm text-zinc-900 shadow-sm ring-1 ring-black/5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_a]:text-emerald-700 [&_a]:underline [&_code]:rounded [&_code]:bg-zinc-200/70 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-bold [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-100 [&_pre]:p-3 [&_pre]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-bold [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5">
+                <div className={"max-w-[80%] rounded-2xl bg-white/90 px-4 py-2 text-sm text-zinc-900 shadow-sm ring-1 ring-black/5" + MD_STYLES}>
                   <Markdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -688,6 +833,8 @@ export default function AssistantPage() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* エラー表示 */}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
@@ -782,6 +929,7 @@ export default function AssistantPage() {
           </button>
         )}
       </form>
+          </div>
         </div>
       </main>
     </div>

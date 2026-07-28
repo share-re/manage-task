@@ -1153,26 +1153,7 @@ export default function TasksPage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
         <div className="flex items-center gap-2">
-          <Link
-            href="/tasks/mail"
-            aria-label="メール共有の設定"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-              aria-hidden="true"
-            >
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <path d="m3 8 9 6 9-6" />
-            </svg>
-            メール共有
-          </Link>
+          {/* メール共有は「マスタ管理 ＞ 共有先」に統合したため導線を削除。 */}
           <Link
             href="/office"
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"

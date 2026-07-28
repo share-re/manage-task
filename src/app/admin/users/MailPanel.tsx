@@ -1,15 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import type { MailRecipientRow, SendAs } from "@/lib/mailRecipients";
+import {
+  getEmailSettings,
+  saveEmailSettings,
+  WEEKDAY_LABELS,
+  type MailFrequency,
+} from "@/lib/emailSettings";
+import { listSendLog, type SendLog } from "@/lib/sendLog";
 import { C, CARD_STYLE, Pill } from "./theme";
 
 type Member = { id: string; name: string | null; email: string | null };
 
 /**
- * 共有先マスタ — who receives the progress summary mail.
+ * 共有先 — everything about the progress summary mail: who receives it, when
+ * it goes out, sending it by hand, and what has been sent.
+ *
+ * This absorbed the former /tasks/mail screen. The To / Bcc text boxes it had
+ * are gone: each recipient row now carries its own To/Bcc, so the boxes were a
+ * second, conflicting answer to the same question.
  *
  * Members are picked from the list rather than typed: their address already
  * exists in profiles, and a typed one would be a second copy that can go
@@ -30,6 +41,22 @@ export default function MailPanel() {
   const [memberPick, setMemberPick] = useState("");
   const [extEmail, setExtEmail] = useState("");
   const [extLabel, setExtLabel] = useState("");
+
+  // --- schedule (from the former /tasks/mail screen) ---
+  const [settingsId, setSettingsId] = useState<string>();
+  const [frequency, setFrequency] = useState<MailFrequency>("weekly");
+  const [dayOfWeek, setDayOfWeek] = useState(1); // Monday
+  const [sendTime, setSendTime] = useState("09:00");
+  const [enabled, setEnabled] = useState(true);
+  // The hand-typed addresses are no longer editable, but they are still what
+  // the send route falls back to while the recipient list is empty. Carry them
+  // through every save untouched rather than blanking them.
+  const [legacyTo, setLegacyTo] = useState("");
+  const [legacyBcc, setLegacyBcc] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [sending, setSending] = useState<"test" | "now" | null>(null);
+  const [logs, setLogs] = useState<SendLog[]>([]);
 
   // Note: no setLoading(true) here. It starts true, and a reload after an edit
   // should not flash the table away — the buttons are already disabled by busy.
@@ -54,6 +81,90 @@ export default function MailPanel() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadLogs = useCallback(() => {
+    listSendLog()
+      .then(setLogs)
+      .catch((err) => console.error("送信履歴の読み込みに失敗:", err));
+  }, []);
+
+  useEffect(() => {
+    getEmailSettings()
+      .then((s) => {
+        if (!s) return;
+        setSettingsId(s.id);
+        setFrequency(s.frequency);
+        setDayOfWeek(s.day_of_week ?? 1);
+        setSendTime((s.send_time ?? "09:00").slice(0, 5));
+        setEnabled(s.enabled);
+        setLegacyTo(s.to_recipients ?? "");
+        setLegacyBcc(s.bcc_recipients ?? s.recipients ?? "");
+      })
+      .catch((err) => console.error("メール設定の読み込みに失敗:", err));
+    loadLogs();
+  }, [loadLogs]);
+
+  async function saveSchedule(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const saved = await saveEmailSettings(
+        {
+          toRecipients: legacyTo,
+          bccRecipients: legacyBcc,
+          frequency,
+          dayOfWeek: frequency === "weekly" ? dayOfWeek : null,
+          sendTime,
+          enabled,
+        },
+        settingsId,
+      );
+      setSettingsId(saved.id); // keep the id so the next save updates this row
+      setNotice("送信スケジュールを保存しました。");
+    } catch (err) {
+      console.error(err);
+      setError("保存に失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Test goes to your own address only; "now" goes to the real list. */
+  async function send(kind: "test" | "now") {
+    if (!token) return;
+    if (
+      kind === "now" &&
+      !window.confirm("登録されている共有先へ、進捗サマリを今すぐ送信します。よろしいですか？")
+    )
+      return;
+    setSending(kind);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/send-summary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(
+          kind === "test" ? { testRecipient: session?.user.email } : {},
+        ),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "送信に失敗しました。");
+      setNotice(
+        `${kind === "test" ? "テスト送信" : "送信"}しました：${(data.sentTo ?? []).join(", ")}`,
+      );
+      loadLogs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "送信に失敗しました。");
+    } finally {
+      setSending(null);
+    }
+  }
 
   const memberById = useMemo(
     () => new Map(members.map((m) => [m.id, m])),
@@ -123,10 +234,8 @@ export default function MailPanel() {
         </span>
       </div>
       <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
-        定期サマリメールの<b style={{ color: C.ink }}>届け先</b>です。
-        これまで <Link href="/tasks/mail" className="underline">メール共有の設定</Link>{" "}
-        にアドレスを手入力していた部分を、
-        <b style={{ color: C.ink }}>一覧で管理できる</b>ようにします。
+        進捗サマリメールの<b style={{ color: C.ink }}>届け先・送信スケジュール・送信履歴</b>
+        をまとめて扱います。以前の「メール共有の設定」画面はこの中に統合しました。
       </p>
 
       {notice && (
@@ -152,10 +261,8 @@ export default function MailPanel() {
           style={{ background: C.warnBg, color: C.ink }}
         >
           <b style={{ color: C.warn }}>まだ1件も登録がありません。</b>
-          この状態では、これまでどおり
-          <Link href="/tasks/mail" className="underline">メール共有の設定</Link>
-          に手入力したアドレスへ送られます。
-          <b style={{ color: C.ink }}>1件でも登録するとこちらが優先されます。</b>
+          この状態のあいだは、以前の画面で保存済みのアドレスへ送られます（設定が消えないよう残してあります）。
+          <b style={{ color: C.ink }}>1件でも登録すると、こちらの一覧が宛先になります。</b>
         </p>
       )}
 
@@ -370,19 +477,170 @@ export default function MailPanel() {
         <b style={{ color: C.ink }}>Bcc</b> は見えません。
         社外の宛先が混ざるときは、アドレスを互いに知らせないために Bcc が無難です（既定は Bcc）。
       </p>
-      <p
-        className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
+
+      {/* ---------- schedule ---------- */}
+      <h3 className="mb-2 mt-6 text-[0.95rem] font-extrabold">🗓 送信スケジュール</h3>
+      <form
+        onSubmit={saveSchedule}
+        className="rounded-xl p-3"
+        style={{ background: C.card2, border: `1px solid ${C.line}` }}
       >
-        <b style={{ color: C.ink }}>送信の頻度・曜日・時刻は</b>
-        <Link href="/tasks/mail" className="underline">メール共有の設定</Link>
-        のままです。この画面が決めるのは<b style={{ color: C.ink }}>「誰に」</b>だけで、
-        「いつ」は変えていません。
-      </p>
+        <label className="flex items-center gap-2 text-sm font-bold">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            className="h-4 w-4"
+          />
+          自動送信を有効にする
+        </label>
+        {!enabled && (
+          <p className="mt-1 text-[0.78rem]" style={{ color: C.warn }}>
+            ⚠ いまは自動送信が止まっています（設定の保存と「今すぐ送信」はできます）。
+          </p>
+        )}
+
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[0.72rem] font-bold" style={{ color: C.muted }}>
+              頻度
+            </span>
+            <select
+              value={frequency}
+              onChange={(e) => setFrequency(e.target.value as MailFrequency)}
+              className="rounded-lg px-2 py-1.5 text-sm"
+              style={inputStyle}
+            >
+              <option value="daily">毎日</option>
+              <option value="weekly">毎週</option>
+            </select>
+          </label>
+
+          {frequency === "weekly" && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[0.72rem] font-bold" style={{ color: C.muted }}>
+                曜日
+              </span>
+              <select
+                value={dayOfWeek}
+                onChange={(e) => setDayOfWeek(Number(e.target.value))}
+                className="rounded-lg px-2 py-1.5 text-sm"
+                style={inputStyle}
+              >
+                {WEEKDAY_LABELS.map((label, i) => (
+                  <option key={i} value={i}>
+                    {label}曜日
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="flex flex-col gap-1">
+            <span className="text-[0.72rem] font-bold" style={{ color: C.muted }}>
+              送信時刻
+            </span>
+            <input
+              type="time"
+              value={sendTime}
+              onChange={(e) => setSendTime(e.target.value)}
+              className="rounded-lg px-2 py-1.5 text-sm"
+              style={inputStyle}
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            style={{ background: C.accent }}
+          >
+            {saving ? "保存中…" : "保存する"}
+          </button>
+        </div>
+      </form>
+
+      {/* ---------- send by hand ---------- */}
+      <h3 className="mb-2 mt-6 text-[0.95rem] font-extrabold">📤 送信</h3>
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-xl p-3"
+        style={{ background: C.card2, border: `1px solid ${C.line}` }}
+      >
+        <button
+          type="button"
+          disabled={sending !== null}
+          onClick={() => send("test")}
+          className="rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50"
+          style={{ border: `1px solid ${C.accent}`, color: C.accentInk }}
+        >
+          {sending === "test" ? "送信中…" : "テスト送信（自分だけに届く）"}
+        </button>
+        <button
+          type="button"
+          disabled={sending !== null}
+          onClick={() => send("now")}
+          className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+          style={{ background: C.accent }}
+        >
+          {sending === "now" ? "送信中…" : "今すぐ送信"}
+        </button>
+        <p className="w-full text-[0.72rem]" style={{ color: C.muted }}>
+          テスト送信はログイン中のあなた宛にだけ届きます。
+          <b style={{ color: C.ink }}>「今すぐ送信」は上の共有先全員に届きます</b>
+          （実行前に確認が出ます）。
+        </p>
+      </div>
+
+      {/* ---------- history ---------- */}
+      <h3 className="mb-2 mt-6 text-[0.95rem] font-extrabold">🧾 送信履歴</h3>
+      <div
+        className="rounded-xl p-3"
+        style={{ background: C.card2, border: `1px solid ${C.line}` }}
+      >
+        {logs.length === 0 ? (
+          <p className="text-[0.82rem]" style={{ color: C.muted }}>
+            まだ送信履歴はありません。
+          </p>
+        ) : (
+          <ul className="flex max-h-72 flex-col overflow-y-auto">
+            {logs.map((log) => (
+              <li
+                key={log.id}
+                className="flex items-start justify-between gap-3 py-2 text-sm"
+                style={{ borderBottom: `1px solid ${C.line}` }}
+              >
+                <div className="min-w-0">
+                  <p>
+                    {new Date(log.sent_at).toLocaleString("ja-JP", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                  <p className="truncate text-xs" style={{ color: C.muted }}>
+                    {log.recipients || "（宛先不明）"}
+                  </p>
+                  {log.status === "failed" && log.error && (
+                    <p className="truncate text-xs" style={{ color: C.danger }}>
+                      {log.error}
+                    </p>
+                  )}
+                </div>
+                {log.status === "sent" ? (
+                  <Pill bg={C.accentSoft} color={C.accentInk}>
+                    送信
+                  </Pill>
+                ) : (
+                  <Pill bg={C.dangerBg} color={C.danger}>
+                    失敗
+                  </Pill>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

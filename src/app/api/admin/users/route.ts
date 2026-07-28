@@ -12,6 +12,10 @@ type ManagedUser = {
   created_at: string;
 };
 
+// Display names are limited to the same length the user-facing editor allows
+// (see the office screen), so an admin can't set a name the owner couldn't.
+const NAME_MAX = 20;
+
 // F5: list users (admin only). Small-team scale — default page (~50) is fine.
 export async function GET(req: Request) {
   const g = await requireAdmin(req);
@@ -21,10 +25,24 @@ export async function GET(req: Request) {
   const { data, error } = await supabaseAdmin.auth.admin.listUsers();
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
+  // profiles.name is the source of truth for the assignee label shown across
+  // the app, so prefer it here too — otherwise this screen could show a name
+  // that differs from the one on the task list. user_metadata.name is the
+  // fallback for rows that predate the profiles table.
+  const { data: profiles } = await supabaseAdmin
+    .from("profiles")
+    .select("id, name");
+  const profileName = new Map<string, string | null>();
+  for (const p of profiles ?? [])
+    profileName.set(p.id as string, (p.name as string | null) ?? null);
+
   const users: ManagedUser[] = data.users.map((u) => ({
     id: u.id,
     email: u.email ?? null,
-    name: (u.user_metadata?.name as string | undefined) ?? null,
+    name:
+      profileName.get(u.id) ??
+      (u.user_metadata?.name as string | undefined) ??
+      null,
     role: u.app_metadata?.role === "admin" ? "admin" : "general",
     banned: Boolean((u as { banned_until?: string | null }).banned_until),
     created_at: u.created_at,
@@ -32,7 +50,8 @@ export async function GET(req: Request) {
   return Response.json({ users });
 }
 
-// F6/F7: change role or toggle ban. Body: { userId, role?, banned? }
+// F6/F7: change role or toggle ban, and set the display name.
+// Body: { userId, role?, banned?, name? }
 export async function PATCH(req: Request) {
   const g = await requireAdmin(req);
   if (!g.ok) return Response.json({ error: g.error }, { status: g.status });
@@ -41,10 +60,22 @@ export async function PATCH(req: Request) {
     userId?: string;
     role?: string;
     banned?: boolean;
+    name?: string;
   };
   const { userId, role, banned } = body;
   if (!userId)
     return Response.json({ error: "userId が必要です。" }, { status: 400 });
+
+  const name = typeof body.name === "string" ? body.name.trim() : undefined;
+  if (name !== undefined) {
+    if (!name)
+      return Response.json({ error: "表示名を入力してください。" }, { status: 400 });
+    if (name.length > NAME_MAX)
+      return Response.json(
+        { error: `表示名は${NAME_MAX}文字以内で入力してください。` },
+        { status: 400 },
+      );
+  }
 
   const supabaseAdmin = getSupabaseAdmin();
 
@@ -67,6 +98,7 @@ export async function PATCH(req: Request) {
   if (role === "admin" || role === "general") attrs.app_metadata = { role };
   if (banned === true) attrs.ban_duration = "876000h"; // effectively permanent
   if (banned === false) attrs.ban_duration = "none"; // lift the ban
+  if (name !== undefined) attrs.user_metadata = { name };
   if (Object.keys(attrs).length === 0)
     return Response.json({ error: "変更内容がありません。" }, { status: 400 });
 
@@ -75,5 +107,16 @@ export async function PATCH(req: Request) {
     attrs,
   );
   if (error) return Response.json({ error: error.message }, { status: 500 });
+
+  // Mirror the name into profiles, which is what the rest of the app reads for
+  // the assignee label. This has to run server-side: RLS only lets a user write
+  // their own profiles row, so an admin renaming someone else needs service
+  // role. Written after the auth update so a rejected name never lands here.
+  if (name !== undefined) {
+    const { error: pErr } = await supabaseAdmin
+      .from("profiles")
+      .upsert({ id: userId, name });
+    if (pErr) return Response.json({ error: pErr.message }, { status: 500 });
+  }
   return Response.json({ ok: true });
 }

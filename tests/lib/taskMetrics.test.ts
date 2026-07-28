@@ -5,6 +5,7 @@ import {
   productivity,
   leafProgress,
   estimateAchievement,
+  freezeBaseline,
   type Task,
 } from "../../src/lib/tasks";
 
@@ -31,6 +32,41 @@ function mk(p: Partial<Task> & { id: string }): Task {
     ...p,
   };
 }
+
+describe("freezeBaseline（当初計画の初回凍結）", () => {
+  it("baseline が空なら現在の開始日/期限で埋める", () => {
+    expect(
+      freezeBaseline(
+        { baseline_start: null, baseline_due: null },
+        "2026-07-10",
+        "2026-07-20",
+      ),
+    ).toEqual({ baselineStart: "2026-07-10", baselineDue: "2026-07-20" });
+  });
+
+  it("凍結済みは上書きしない（空の側だけ埋める）", () => {
+    expect(
+      freezeBaseline(
+        { baseline_start: null, baseline_due: "2026-07-20" },
+        "2026-07-10",
+        "2026-07-25", // 期限を変えても baseline_due は動かさない
+      ),
+    ).toEqual({ baselineStart: "2026-07-10" });
+  });
+
+  it("日付が無ければ何も返さない", () => {
+    expect(
+      freezeBaseline({ baseline_start: null, baseline_due: null }, "", ""),
+    ).toEqual({});
+    expect(
+      freezeBaseline(
+        { baseline_start: "2026-07-10", baseline_due: "2026-07-20" },
+        "2026-07-01",
+        "2026-07-30",
+      ),
+    ).toEqual({});
+  });
+});
 
 describe("difficultyFromEstimate（見積り→難易度の自動判定）", () => {
   it("見積りなし・不正値は null（未設定）", () => {

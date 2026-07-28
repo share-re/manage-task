@@ -35,6 +35,7 @@ import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
 import ForestBackground from "@/components/ForestBackground";
+import FeatureProgress from "@/components/FeatureProgress";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
@@ -1128,6 +1129,9 @@ export default function TasksPage() {
     ? `${labelById.get(filterAssigneeId) ?? "担当者"} の進捗`
     : "チーム全体の進捗";
 
+  // 本日の進捗（SkyHero）と機能別の進捗（FeatureProgress）の表示切替。
+  const [progressView, setProgressView] = useState<"today" | "feature">("today");
+
   // Sum of a parent's children actual hours (parent roll-up display, Q-04).
   const childActualSum = (parentId: string) =>
     tasks
@@ -1175,44 +1179,6 @@ export default function TasksPage() {
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
         <div className="flex items-center gap-2">
           <Link
-            href="/tasks/dashboard"
-            aria-label="ダッシュボード"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-              aria-hidden="true"
-            >
-              <path d="M3 3v18h18" />
-              <rect x="7" y="12" width="3" height="6" />
-              <rect x="12" y="8" width="3" height="10" />
-              <rect x="17" y="5" width="3" height="13" />
-            </svg>
-            ダッシュボード
-          </Link>
-          <Link
-            href="/tasks/milestones"
-            aria-label="マイルストーン"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path d="M6 3a1 1 0 0 1 1 1v1h11l-2 3 2 3H7v9a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Z" />
-            </svg>
-            マイルストーン
-          </Link>
-          <Link
             href="/tasks/mail"
             aria-label="メール共有の設定"
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
@@ -1256,13 +1222,40 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Team-wide progress (forest hero) */}
-      <SkyHero
-        done={progress.done}
-        total={progress.total}
-        percent={progress.percent}
-        label={progressLabel}
-      />
+      {/* 本日の進捗 / 機能別の進捗 の切替 */}
+      <div className="mb-2 flex justify-end">
+        <div className="flex rounded-lg bg-zinc-100 p-0.5 text-xs">
+          {(
+            [
+              ["today", "本日の進捗"],
+              ["feature", "機能別の進捗"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setProgressView(key)}
+              className={`rounded-md px-3 py-1 font-medium transition ${
+                progressView === key
+                  ? "bg-white text-zinc-900 shadow-sm"
+                  : "text-zinc-500 hover:text-zinc-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {progressView === "today" ? (
+        <SkyHero
+          done={progress.done}
+          total={progress.total}
+          percent={progress.percent}
+          label={progressLabel}
+        />
+      ) : (
+        <FeatureProgress tasks={tasks} labelById={labelById} />
+      )}
 
       {/* Toolbar: add / delete-mode / filters (open tab only). */}
         {tab === "open" && (

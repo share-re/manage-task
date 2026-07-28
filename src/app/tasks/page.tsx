@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import {
   buildTaskTree,
@@ -45,6 +45,7 @@ import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
 import ForestBackground from "@/components/ForestBackground";
+import TemplateSidebar from "./TemplateSidebar";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
@@ -658,19 +659,24 @@ export default function TasksPage() {
   // effect to avoid a server/client hydration mismatch.
   const [minDate, setMinDate] = useState("");
 
+  // Re-read the task list. Also used after generating from a template, which
+  // inserts a parent and its children in one go.
+  const reloadTasks = useCallback(async () => {
+    try {
+      setTasks(await listTasks());
+    } catch (err) {
+      console.error(err);
+      setError("タスクの読み込みに失敗しました。");
+    }
+  }, []);
+
   useEffect(() => {
     const now = new Date();
     setMinDate(
       `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
     );
 
-    listTasks()
-      .then(setTasks)
-      .catch((err) => {
-        console.error(err);
-        setError("タスクの読み込みに失敗しました。");
-      })
-      .finally(() => setLoaded(true));
+    reloadTasks().finally(() => setLoaded(true));
 
     // Comments are optional; a missing table shouldn't break the page.
     listComments()
@@ -703,7 +709,7 @@ export default function TasksPage() {
     loadTaskTypeMeta()
       .then(setTaskTypeMeta)
       .catch((err) => console.error("種別マスタの読み込みに失敗:", err));
-  }, []);
+  }, [reloadTasks]);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
   useEffect(() => {
@@ -1067,6 +1073,9 @@ export default function TasksPage() {
     sortKey,
     search,
     labelById,
+    // 「優先度が高い順」の並び替えが priorityMeta の order を見ているので、
+    // マスタが読み込まれたタイミングで並べ直す必要がある。
+    priorityMeta,
   ]);
 
   const tree = useMemo(() => buildTaskTree(openTasks), [openTasks]);
@@ -1136,6 +1145,14 @@ export default function TasksPage() {
     <div className="relative flex-1" style={{ colorScheme: "light" }}>
       {/* 植林（/forest）トーンの背景。AI内田さん（/assistant）と共通のコンポーネント。 */}
       <ForestBackground />
+      {/* 仮のサイドバー。本来のサイドバー（案件切替・各機能へのナビ）が入るまでの
+          置き場所として、定型タスクだけを載せている。狭い画面では一覧の上に回る。 */}
+      <div className="flex flex-col lg:flex-row lg:items-start">
+        <TemplateSidebar
+          priorityMeta={priorityMeta}
+          taskTypeMeta={taskTypeMeta}
+          onGenerated={reloadTasks}
+        />
       <main className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
@@ -1778,6 +1795,7 @@ export default function TasksPage() {
         </div>
       )}
     </main>
+      </div>
     </div>
   );
 }

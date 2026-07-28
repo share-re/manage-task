@@ -8,6 +8,7 @@ import { C, CARD_STYLE, Pill } from "./theme";
 import PriorityPanel from "./PriorityPanel";
 import StatusPanel from "./StatusPanel";
 import TaskTypePanel from "./TaskTypePanel";
+import TemplatePanel from "./TemplatePanel";
 
 type ManagedUser = {
   id: string;
@@ -24,12 +25,9 @@ const NAME_MAX = 20;
 
 // Master tabs that have no data behind them yet. They render disabled rather
 // than linking somewhere that doesn't exist.
-const PLANNED_TABS = [
-  { emoji: "📋", label: "定型タスク" },
-  { emoji: "✉️", label: "共有先" },
-];
+const PLANNED_TABS = [{ emoji: "✉️", label: "共有先" }];
 
-type MasterTab = "member" | "priority" | "status" | "taskType";
+type MasterTab = "member" | "priority" | "status" | "taskType" | "template";
 
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -340,6 +338,7 @@ export default function AdminUsersPage() {
                 { key: "priority", emoji: "🚩", label: "優先度" },
                 { key: "status", emoji: "📊", label: "状態" },
                 { key: "taskType", emoji: "🏷", label: "種別" },
+                { key: "template", emoji: "📋", label: "定型タスク" },
               ] as { key: MasterTab; emoji: string; label: string }[]
             ).map((t) => (
               <button
@@ -376,6 +375,7 @@ export default function AdminUsersPage() {
           {tab === "priority" && <PriorityPanel tasks={tasks} />}
           {tab === "status" && <StatusPanel tasks={tasks} />}
           {tab === "taskType" && <TaskTypePanel tasks={tasks} />}
+          {tab === "template" && <TemplatePanel />}
 
           {tab === "member" && (
           <section className="px-5 py-4" style={CARD_STYLE}>

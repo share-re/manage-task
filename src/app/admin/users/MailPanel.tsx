@@ -1,0 +1,388 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useAuth } from "@/components/AuthProvider";
+import type { MailRecipientRow, SendAs } from "@/lib/mailRecipients";
+import { C, CARD_STYLE, Pill } from "./theme";
+
+type Member = { id: string; name: string | null; email: string | null };
+
+/**
+ * 共有先マスタ — who receives the progress summary mail.
+ *
+ * Members are picked from the list rather than typed: their address already
+ * exists in profiles, and a typed one would be a second copy that can go
+ * stale. Outside addresses (a mailing list, someone without an account) are
+ * typed, because nothing else in the app knows them.
+ */
+export default function MailPanel() {
+  const { session } = useAuth();
+  const token = session?.access_token;
+
+  const [rows, setRows] = useState<MailRecipientRow[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const [memberPick, setMemberPick] = useState("");
+  const [extEmail, setExtEmail] = useState("");
+  const [extLabel, setExtLabel] = useState("");
+
+  // Note: no setLoading(true) here. It starts true, and a reload after an edit
+  // should not flash the table away — the buttons are already disabled by busy.
+  const load = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/admin/mail-recipients", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "取得に失敗しました。");
+      setRows(json.recipients as MailRecipientRow[]);
+      setMembers(json.members as Member[]);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const memberById = useMemo(
+    () => new Map(members.map((m) => [m.id, m])),
+    [members],
+  );
+  // Members already on the list must not be offered again — the unique index
+  // would reject the insert anyway.
+  const addable = useMemo(
+    () =>
+      members.filter((m) => !rows.some((r) => r.user_id === m.id)),
+    [members, rows],
+  );
+
+  const enabledCount = rows.filter((r) => r.enabled).length;
+
+  async function call(
+    method: "POST" | "PATCH" | "DELETE",
+    body: Record<string, unknown>,
+    okMessage?: string,
+  ) {
+    if (!token) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/admin/mail-recipients", {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "更新に失敗しました。");
+      await load();
+      if (okMessage) setNotice(okMessage);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function displayOf(r: MailRecipientRow): { name: string; sub: string } {
+    if (r.user_id) {
+      const m = memberById.get(r.user_id);
+      return {
+        name: m?.name?.trim() || m?.email || "（不明なメンバー）",
+        sub: m?.email ?? "アドレス未設定",
+      };
+    }
+    return { name: r.label?.trim() || r.email || "", sub: r.email ?? "" };
+  }
+
+  const inputStyle = {
+    border: `1px solid ${C.line}`,
+    background: C.card,
+  } as const;
+
+  return (
+    <section className="px-5 py-4" style={CARD_STYLE}>
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="text-[1.05rem] font-extrabold">✉️ 共有先マスタ</h2>
+        <span className="text-[0.82rem]" style={{ color: C.muted }}>
+          {loading ? "読み込み中…" : `${rows.length}件中 ${enabledCount}件が受信`}
+        </span>
+      </div>
+      <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
+        定期サマリメールの<b style={{ color: C.ink }}>届け先</b>です。
+        これまで <Link href="/tasks/mail" className="underline">メール共有の設定</Link>{" "}
+        にアドレスを手入力していた部分を、
+        <b style={{ color: C.ink }}>一覧で管理できる</b>ようにします。
+      </p>
+
+      {notice && (
+        <p
+          className="mb-3 rounded-lg px-3 py-2 text-sm"
+          style={{ background: C.accentSoft, color: C.accentInk }}
+        >
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p
+          className="mb-3 rounded-lg px-3 py-2 text-sm"
+          style={{ background: C.dangerBg, color: C.danger }}
+        >
+          {error}
+        </p>
+      )}
+
+      {!loading && rows.length === 0 && !error && (
+        <p
+          className="mb-3 rounded-lg px-3 py-2 text-[0.84rem]"
+          style={{ background: C.warnBg, color: C.ink }}
+        >
+          <b style={{ color: C.warn }}>まだ1件も登録がありません。</b>
+          この状態では、これまでどおり
+          <Link href="/tasks/mail" className="underline">メール共有の設定</Link>
+          に手入力したアドレスへ送られます。
+          <b style={{ color: C.ink }}>1件でも登録するとこちらが優先されます。</b>
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <div
+          className="overflow-x-auto rounded-xl"
+          style={{ border: `1px solid ${C.line}` }}
+        >
+          <table className="w-full min-w-[640px] border-collapse text-[0.85rem]">
+            <thead>
+              <tr>
+                {["宛先", "種別", "送信区分", "定期サマリ", "操作"].map((h) => (
+                  <th
+                    key={h}
+                    className="whitespace-nowrap px-3 py-2.5 text-left text-[0.72rem] font-extrabold uppercase tracking-[0.06em]"
+                    style={{
+                      background: C.card2,
+                      color: C.muted,
+                      borderBottom: `1px solid ${C.line}`,
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const d = displayOf(r);
+                return (
+                  <tr key={r.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-3 py-2.5">
+                      <div className="font-bold">{d.name}</div>
+                      <div className="font-mono text-[0.75rem]" style={{ color: C.muted }}>
+                        {d.sub}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {r.user_id ? (
+                        <Pill bg={C.infoBg} color={C.info}>
+                          メンバー
+                        </Pill>
+                      ) : (
+                        <Pill bg={C.card2} color={C.muted} outlined>
+                          外部
+                        </Pill>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <select
+                        value={r.send_as}
+                        disabled={busy}
+                        onChange={(e) =>
+                          call("PATCH", {
+                            id: r.id,
+                            sendAs: e.target.value as SendAs,
+                          })
+                        }
+                        className="rounded-lg px-2 py-1 text-sm"
+                        style={inputStyle}
+                      >
+                        <option value="bcc">Bcc（他に見せない）</option>
+                        <option value="to">To（宛先）</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          call("PATCH", { id: r.id, enabled: !r.enabled })
+                        }
+                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                        style={
+                          r.enabled
+                            ? {
+                                border: `1px solid ${C.accent}`,
+                                background: C.accentSoft,
+                                color: C.accentInk,
+                              }
+                            : { border: `1px solid ${C.line}`, color: C.muted }
+                        }
+                      >
+                        {r.enabled ? "受け取る" : "受け取らない"}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          call("DELETE", { id: r.id }, "共有先から外しました。")
+                        }
+                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                        style={{ border: `1px solid ${C.danger}`, color: C.danger }}
+                      >
+                        外す
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* --- add a member --- */}
+      <div
+        className="mt-3 flex flex-wrap items-end gap-2 rounded-xl p-3"
+        style={{ background: C.card2, border: `1px solid ${C.line}` }}
+      >
+        <label className="flex flex-col gap-1">
+          <span className="text-[0.72rem] font-bold" style={{ color: C.muted }}>
+            メンバーを追加
+          </span>
+          <select
+            value={memberPick}
+            onChange={(e) => setMemberPick(e.target.value)}
+            disabled={busy || addable.length === 0}
+            className="min-w-[220px] rounded-lg px-2 py-1.5 text-sm"
+            style={inputStyle}
+          >
+            <option value="">
+              {addable.length ? "選択してください" : "全員が登録済みです"}
+            </option>
+            {addable.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name?.trim() || m.email || "名前未設定"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          disabled={busy || !memberPick}
+          onClick={() =>
+            call("POST", { userId: memberPick }, "共有先に追加しました。").then(
+              () => setMemberPick(""),
+            )
+          }
+          className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+          style={{ background: C.accent }}
+        >
+          ＋ 追加
+        </button>
+        <p className="w-full text-[0.72rem]" style={{ color: C.muted }}>
+          メンバーのアドレスは入力しません。メンバーマスタの登録内容がそのまま使われるので、
+          <b style={{ color: C.ink }}>アドレスが変わっても直す必要がありません</b>。
+        </p>
+      </div>
+
+      {/* --- add an outside address --- */}
+      <div
+        className="mt-2 flex flex-wrap items-end gap-2 rounded-xl p-3"
+        style={{ background: C.card2, border: `1px solid ${C.line}` }}
+      >
+        <label className="flex flex-col gap-1">
+          <span className="text-[0.72rem] font-bold" style={{ color: C.muted }}>
+            外部のメールアドレス
+          </span>
+          <input
+            type="email"
+            value={extEmail}
+            onChange={(e) => setExtEmail(e.target.value)}
+            placeholder="例：team-ml@example.com"
+            className="min-w-[240px] rounded-lg px-2 py-1.5 text-sm"
+            style={inputStyle}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[0.72rem] font-bold" style={{ color: C.muted }}>
+            表示名（任意）
+          </span>
+          <input
+            value={extLabel}
+            onChange={(e) => setExtLabel(e.target.value)}
+            placeholder="例：チーム全体ML"
+            className="min-w-[160px] rounded-lg px-2 py-1.5 text-sm"
+            style={inputStyle}
+          />
+        </label>
+        <button
+          disabled={busy || !extEmail.trim()}
+          onClick={() =>
+            call(
+              "POST",
+              { email: extEmail, label: extLabel },
+              "共有先に追加しました。",
+            ).then(() => {
+              setExtEmail("");
+              setExtLabel("");
+            })
+          }
+          className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+          style={{ background: C.accent }}
+        >
+          ＋ 追加
+        </button>
+        <p className="w-full text-[0.72rem]" style={{ color: C.muted }}>
+          メーリングリストや、アプリを使っていない人の宛先はこちらに登録します。
+        </p>
+      </div>
+
+      <p
+        className="mt-3.5 rounded-xl px-3 py-2.5 text-[0.82rem]"
+        style={{
+          background: C.card2,
+          border: `1px dashed ${C.line}`,
+          color: C.muted,
+        }}
+      >
+        <b style={{ color: C.ink }}>To と Bcc の違い：</b>
+        <b style={{ color: C.ink }}>To</b> は宛先が受信者全員に見えます。
+        <b style={{ color: C.ink }}>Bcc</b> は見えません。
+        社外の宛先が混ざるときは、アドレスを互いに知らせないために Bcc が無難です（既定は Bcc）。
+      </p>
+      <p
+        className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
+        style={{
+          background: C.card2,
+          border: `1px dashed ${C.line}`,
+          color: C.muted,
+        }}
+      >
+        <b style={{ color: C.ink }}>送信の頻度・曜日・時刻は</b>
+        <Link href="/tasks/mail" className="underline">メール共有の設定</Link>
+        のままです。この画面が決めるのは<b style={{ color: C.ink }}>「誰に」</b>だけで、
+        「いつ」は変えていません。
+      </p>
+    </section>
+  );
+}

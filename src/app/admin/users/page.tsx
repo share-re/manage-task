@@ -9,6 +9,7 @@ import PriorityPanel from "./PriorityPanel";
 import StatusPanel from "./StatusPanel";
 import TaskTypePanel from "./TaskTypePanel";
 import TemplatePanel from "./TemplatePanel";
+import MailPanel from "./MailPanel";
 
 type ManagedUser = {
   id: string;
@@ -23,11 +24,13 @@ type ManagedUser = {
 
 const NAME_MAX = 20;
 
-// Master tabs that have no data behind them yet. They render disabled rather
-// than linking somewhere that doesn't exist.
-const PLANNED_TABS = [{ emoji: "✉️", label: "共有先" }];
-
-type MasterTab = "member" | "priority" | "status" | "taskType" | "template";
+type MasterTab =
+  | "member"
+  | "priority"
+  | "status"
+  | "taskType"
+  | "template"
+  | "mail";
 
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -339,6 +342,7 @@ export default function AdminUsersPage() {
                 { key: "status", emoji: "📊", label: "状態" },
                 { key: "taskType", emoji: "🏷", label: "種別" },
                 { key: "template", emoji: "📋", label: "定型タスク" },
+                { key: "mail", emoji: "✉️", label: "共有先" },
               ] as { key: MasterTab; emoji: string; label: string }[]
             ).map((t) => (
               <button
@@ -357,25 +361,13 @@ export default function AdminUsersPage() {
                 {t.label}
               </button>
             ))}
-            {PLANNED_TABS.map((t) => (
-              <div
-                key={t.label}
-                className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-xl px-2.5 py-2 text-[0.86rem] font-bold opacity-55"
-                title="今後追加予定です"
-              >
-                <span className="w-[1.15em] text-center">{t.emoji}</span>
-                {t.label}
-                <span className="ml-auto text-[0.72rem]" style={{ color: C.muted }}>
-                  今後
-                </span>
-              </div>
-            ))}
           </nav>
 
           {tab === "priority" && <PriorityPanel tasks={tasks} />}
           {tab === "status" && <StatusPanel tasks={tasks} />}
           {tab === "taskType" && <TaskTypePanel tasks={tasks} />}
           {tab === "template" && <TemplatePanel />}
+          {tab === "mail" && <MailPanel />}
 
           {tab === "member" && (
           <section className="px-5 py-4" style={CARD_STYLE}>

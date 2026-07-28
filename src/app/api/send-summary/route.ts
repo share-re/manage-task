@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildProgressSummary } from "@/lib/summary";
 import { sendMail } from "@/lib/mailer";
+import {
+  resolveSummaryRecipients,
+  type MailRecipientRow,
+} from "@/lib/mailRecipients";
 import type { Task } from "@/lib/tasks";
 
 export const runtime = "nodejs";
@@ -103,6 +107,30 @@ async function runSend(opts: {
     bcc = parseList(settings?.bcc_recipients);
     if (to.length === 0 && bcc.length === 0) {
       bcc = parseList(settings?.recipients); // legacy fallback
+    }
+
+    // The 共有先 master takes over once it holds at least one enabled row.
+    // Until then the hand-typed strings above stay in charge, so creating the
+    // table changes nothing on its own.
+    const { data: recipientRows } = await supabaseAdmin
+      .from("mail_recipients")
+      .select("id, user_id, email, label, send_as, enabled")
+      .order("sort_order", { ascending: true });
+    if (recipientRows?.length) {
+      // Member addresses live in profiles, never copied into the master, so a
+      // changed address takes effect without touching the recipient list.
+      const { data: addrRows } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email");
+      const emailByUserId = new Map<string, string | null>();
+      for (const p of addrRows ?? [])
+        emailByUserId.set(p.id as string, (p.email as string | null) ?? null);
+
+      ({ to, bcc } = resolveSummaryRecipients(
+        recipientRows as MailRecipientRow[],
+        emailByUserId,
+        { to, bcc },
+      ));
     }
   }
   if (to.length === 0 && bcc.length === 0) {

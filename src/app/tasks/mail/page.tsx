@@ -10,6 +10,7 @@ import {
   type MailFrequency,
 } from "@/lib/emailSettings";
 import { listSendLog, type SendLog } from "@/lib/sendLog";
+import { supabase } from "@/lib/supabase";
 
 export default function MailSettingsPage() {
   const { session } = useAuth();
@@ -23,6 +24,9 @@ export default function MailSettingsPage() {
   const [enabled, setEnabled] = useState(true);
 
   const [loaded, setLoaded] = useState(false);
+  // True once the 共有先 master has at least one enabled recipient, which is
+  // when it takes over from the To/Bcc fields below.
+  const [masterManaged, setMasterManaged] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
@@ -111,6 +115,15 @@ export default function MailSettingsPage() {
   }
 
   useEffect(() => {
+    // Readable by any logged-in user (RLS), so this needs no admin route. A
+    // missing table simply leaves the flag false.
+    supabase
+      .from("mail_recipients")
+      .select("id")
+      .eq("enabled", true)
+      .limit(1)
+      .then(({ data }) => setMasterManaged(Boolean(data?.length)));
+
     getEmailSettings()
       .then((s) => {
         if (!s) return;
@@ -268,7 +281,17 @@ export default function MailSettingsPage() {
             )}
           </div>
 
-          {/* Recipients: To / Bcc */}
+          {/* Recipients: To / Bcc.
+              Once the 共有先 master holds an enabled row it decides the
+              addresses, and these two fields stop having any effect. Saying so
+              here beats letting someone edit them and wonder why nothing
+              changed. */}
+          {masterManaged && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              宛先は<b>マスタ管理の「共有先」</b>で管理されています。
+              下の To / Bcc は<b>使われません</b>（送信の頻度・曜日・時刻はこの画面のままです）。
+            </p>
+          )}
           <label className="flex flex-col gap-1">
             <span className="text-sm font-medium text-zinc-700">
               To（宛先・複数はカンマ区切り）

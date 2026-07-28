@@ -15,7 +15,7 @@ import { C, CARD_STYLE } from "./theme";
  *
  * Editing a template means adding, removing and reordering its children, which
  * is a different kind of screen from renaming a label. The built-in templates
- * already work (see TemplateSidebar), so showing what they contain is the
+ * already work (see /tasks/templates), so showing what they contain is the
  * useful half; the editor comes once task_templates exists to save into.
  */
 export default function TemplatePanel() {
@@ -41,7 +41,9 @@ export default function TemplatePanel() {
       </div>
       <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
         毎回同じ手順で登録している作業の雛形です。
-        <b style={{ color: C.ink }}>生成ボタンは進捗管理（/tasks）の左側にあり、メンバー全員が押せます</b>
+        <b style={{ color: C.ink }}>
+          進捗管理のサイドバー「定型タスク」からメンバー全員が生成できます
+        </b>
         ── 雛形を決めるのは管理者、使うのは全員、という切り分けです。
       </p>
 

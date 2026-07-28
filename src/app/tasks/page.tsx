@@ -45,7 +45,7 @@ import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
 import ForestBackground from "@/components/ForestBackground";
-import TemplateSidebar from "./TemplateSidebar";
+import TaskNav from "./TaskNav";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
@@ -1146,13 +1146,9 @@ export default function TasksPage() {
       {/* 植林（/forest）トーンの背景。AI内田さん（/assistant）と共通のコンポーネント。 */}
       <ForestBackground />
       {/* 仮のサイドバー。本来のサイドバー（案件切替・各機能へのナビ）が入るまでの
-          置き場所として、定型タスクだけを載せている。狭い画面では一覧の上に回る。 */}
+          置き場所。狭い画面では一覧の上に回る。 */}
       <div className="flex flex-col lg:flex-row lg:items-start">
-        <TemplateSidebar
-          priorityMeta={priorityMeta}
-          taskTypeMeta={taskTypeMeta}
-          onGenerated={reloadTasks}
-        />
+        <TaskNav />
       <main className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>

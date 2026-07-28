@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -9,26 +9,49 @@ import {
   passkeyRegisteredKey,
 } from "@/lib/passkey";
 
+// WebAuthn support can't change while the page is open, so there is nothing to
+// subscribe to. The server has no WebAuthn API, so it renders "unsupported".
+const subscribeNever = () => () => {};
+const getFalse = () => false;
+
+// localStorage is an external store: read it through useSyncExternalStore so the
+// value is picked up without an effect and stays SSR-safe. "storage" only fires
+// in *other* tabs, so registering in this tab dispatches its own event.
+const PASSKEY_CHANGED = "passkey-registered-changed";
+
+function subscribePasskeyStorage(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(PASSKEY_CHANGED, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(PASSKEY_CHANGED, onChange);
+  };
+}
+
 /** Lets the logged-in user create a passkey for their account. */
 export default function PasskeyRegisterButton() {
   const { session } = useAuth();
   const userId = session?.user.id;
 
-  const [supported, setSupported] = useState(false);
-  const [registered, setRegistered] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
 
   // Feature detection + "already registered on this device" hint. Both read
-  // browser-only APIs, so they run in an effect to avoid a hydration mismatch.
-  useEffect(() => {
-    setSupported(isPasskeySupported());
-  }, []);
-  useEffect(() => {
-    if (!userId) return;
-    setRegistered(localStorage.getItem(passkeyRegisteredKey(userId)) === "1");
-  }, [userId]);
+  // browser-only APIs, so they go through useSyncExternalStore (no effect, no
+  // hydration mismatch, and the flag re-reads when the user changes).
+  const supported = useSyncExternalStore(
+    subscribeNever,
+    isPasskeySupported,
+    getFalse,
+  );
+  const registered = useSyncExternalStore(
+    subscribePasskeyStorage,
+    () =>
+      !!userId &&
+      localStorage.getItem(passkeyRegisteredKey(userId)) === "1",
+    getFalse,
+  );
 
   async function onRegister() {
     setLoading(true);
@@ -37,8 +60,11 @@ export default function PasskeyRegisterButton() {
     try {
       const { error } = await supabase.auth.registerPasskey();
       if (error) throw error;
-      if (userId) localStorage.setItem(passkeyRegisteredKey(userId), "1");
-      setRegistered(true);
+      if (userId) {
+        localStorage.setItem(passkeyRegisteredKey(userId), "1");
+        // Same-tab writes don't fire "storage", so nudge the store ourselves.
+        window.dispatchEvent(new Event(PASSKEY_CHANGED));
+      }
       setMessage("パスキーを登録しました。次回からパスキーでログインできます。");
     } catch (err) {
       console.error(err);

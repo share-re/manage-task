@@ -6,6 +6,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { listTasks, type Task } from "@/lib/tasks";
 import { C, CARD_STYLE, Pill } from "./theme";
 import PriorityPanel from "./PriorityPanel";
+import StatusPanel from "./StatusPanel";
 
 type ManagedUser = {
   id: string;
@@ -23,13 +24,12 @@ const NAME_MAX = 20;
 // Master tabs that have no data behind them yet. They render disabled rather
 // than linking somewhere that doesn't exist.
 const PLANNED_TABS = [
-  { emoji: "📊", label: "状態" },
   { emoji: "🏷", label: "カテゴリ" },
   { emoji: "📋", label: "定型タスク" },
   { emoji: "✉️", label: "共有先" },
 ];
 
-type MasterTab = "member" | "priority";
+type MasterTab = "member" | "priority" | "status";
 
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -338,6 +338,7 @@ export default function AdminUsersPage() {
               [
                 { key: "member", emoji: "👤", label: "メンバー" },
                 { key: "priority", emoji: "🚩", label: "優先度" },
+                { key: "status", emoji: "📊", label: "状態" },
               ] as { key: MasterTab; emoji: string; label: string }[]
             ).map((t) => (
               <button
@@ -372,6 +373,7 @@ export default function AdminUsersPage() {
           </nav>
 
           {tab === "priority" && <PriorityPanel tasks={tasks} />}
+          {tab === "status" && <StatusPanel tasks={tasks} />}
 
           {tab === "member" && (
           <section className="px-5 py-4" style={CARD_STYLE}>

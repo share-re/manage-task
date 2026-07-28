@@ -304,8 +304,9 @@ export default function AdminUsersPage() {
         </div>
 
         {/* Data health — the numbers that say whether this screen has work to
-            do. These count members and assignees, so they belong to that tab. */}
-        {tab === "member" && (
+            do. Shown on every tab, not just the one they describe: hiding it
+            moved the tab list up and down as you switched, and a header that
+            jumps is worse than one number being irrelevant to the open tab. */}
         <div
           className="mb-5 px-5 py-4"
           style={{ ...CARD_STYLE, borderLeft: `5px solid ${C.warn}` }}
@@ -324,7 +325,6 @@ export default function AdminUsersPage() {
             「仮の表示名」は、本人がオフィス画面で自分の名前を保存すると自動で解消されます。
           </p>
         </div>
-        )}
 
         <div className="grid items-start gap-4 md:grid-cols-[244px_1fr]">
           {/* Master categories. Only members exists today. */}

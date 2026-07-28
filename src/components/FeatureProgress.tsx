@@ -142,7 +142,10 @@ export default function FeatureProgress({
   }
 
   return (
-    <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
+    <section
+      className="mb-8 rounded-2xl p-4 shadow-sm ring-1 ring-black/5"
+      style={{ background: "linear-gradient(180deg, #CDE4FA, #EAF3FB)" }}
+    >
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-zinc-800">機能別の進捗</h2>
         <span className="text-[11px] text-zinc-400">

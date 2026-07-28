@@ -115,12 +115,20 @@ export default function AdminUsersPage() {
             <h1 className="text-lg font-bold">⚙ ユーザー管理</h1>
             <p className="text-xs text-white/80">管理者のみが利用できます</p>
           </div>
-          <Link
-            href="/office"
-            className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-semibold transition hover:bg-white/25"
-          >
-            ← オフィスへ
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/tasks"
+              className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-semibold transition hover:bg-white/25"
+            >
+              ← 進捗管理へ
+            </Link>
+            <Link
+              href="/office"
+              className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-semibold transition hover:bg-white/25"
+            >
+              ← オフィスへ
+            </Link>
+          </div>
         </div>
       </header>
 

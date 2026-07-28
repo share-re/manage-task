@@ -68,6 +68,10 @@ export type Task = {
   task_type: TaskType | null;
   estimated_hours: number | null; // 見積工数（着手前の中立な予想・任意）
   actual_hours: number | null; // 実績時間（完了時に入力）
+  start_date: string | null; // 開始日（ガントの棒の左端）… Q-08
+  baseline_start: string | null; // 当初計画の開始（凍結。稲妻線を“動く的”にしない）… 要確認-4
+  baseline_due: string | null; // 当初計画の期限（凍結）… 要確認-4
+  project_id: string | null; // 案件（新階層）… 要確認-10
   parent_id: string | null;
   created_by: string | null;
   created_at: string;
@@ -138,7 +142,7 @@ const DIFFICULTY_XLARGE_MIN_HOURS = 16;
 // Columns fetched from the DB. Listing them explicitly (instead of "*") means
 // the client-side Task type and the query never silently diverge.
 const TASK_COLUMNS =
-  "id, title, assignee, assignee_id, due_date, status, priority, task_type, estimated_hours, actual_hours, parent_id, created_by, created_at, completed_at";
+  "id, title, assignee, assignee_id, due_date, status, priority, task_type, estimated_hours, actual_hours, start_date, baseline_start, baseline_due, project_id, parent_id, created_by, created_at, completed_at";
 
 // Coerce a DB numeric (may arrive as number or string) into number | null.
 function toNumberOrNull(value: unknown): number | null {
@@ -164,6 +168,12 @@ function normalizeTask(row: Record<string, unknown>): Task {
     task_type: isTaskType(row.task_type) ? row.task_type : null,
     estimated_hours: toNumberOrNull(row.estimated_hours),
     actual_hours: toNumberOrNull(row.actual_hours),
+    start_date: typeof row.start_date === "string" ? row.start_date : null,
+    baseline_start:
+      typeof row.baseline_start === "string" ? row.baseline_start : null,
+    baseline_due:
+      typeof row.baseline_due === "string" ? row.baseline_due : null,
+    project_id: typeof row.project_id === "string" ? row.project_id : null,
     parent_id: typeof row.parent_id === "string" ? row.parent_id : null,
     created_by: typeof row.created_by === "string" ? row.created_by : null,
     created_at: typeof row.created_at === "string" ? row.created_at : "",
@@ -192,6 +202,8 @@ export type NewTask = {
   taskType?: TaskType | null;
   estimatedHours?: number | null;
   actualHours?: number | null;
+  startDate?: string;
+  projectId?: string | null;
   parentId?: string | null;
 };
 
@@ -209,6 +221,12 @@ export async function createTask(input: NewTask): Promise<Task> {
       task_type: input.taskType ?? null,
       estimated_hours: input.estimatedHours ?? null,
       actual_hours: input.actualHours ?? null,
+      start_date: input.startDate || null,
+      // Freeze the baseline at creation (copy of the first plan), so later
+      // date edits don't move the lightning-line's target (要確認-4).
+      baseline_start: input.startDate || null,
+      baseline_due: input.dueDate || null,
+      project_id: input.projectId ?? null,
       parent_id: input.parentId ?? null,
       completed_at: input.status === "done" ? new Date().toISOString() : null,
     })
@@ -231,6 +249,10 @@ export async function createTasks(inputs: NewTask[]): Promise<Task[]> {
     task_type: input.taskType ?? null,
     estimated_hours: input.estimatedHours ?? null,
     actual_hours: input.actualHours ?? null,
+    start_date: input.startDate || null,
+    baseline_start: input.startDate || null,
+    baseline_due: input.dueDate || null,
+    project_id: input.projectId ?? null,
     parent_id: input.parentId ?? null,
     completed_at: input.status === "done" ? now : null,
   }));
@@ -313,10 +335,16 @@ export type TaskEdit = {
   dueDate?: string;
   status: TaskStatus;
   priority?: TaskPriority;
-  // The 3 metric fields are optional; only written when provided (see updateTask).
+  // The metric fields and start_date are optional; only written when provided
+  // (see updateTask), so flows that don't touch them can't null them out.
   taskType?: TaskType | null;
   estimatedHours?: number | null;
   actualHours?: number | null;
+  startDate?: string;
+  // Baseline is frozen once (see freezeBaseline): the caller passes these only
+  // to fill an as-yet-unfrozen baseline; an already-frozen one is never sent.
+  baselineStart?: string | null;
+  baselineDue?: string | null;
 };
 
 /**
@@ -341,6 +369,14 @@ export async function updateTask(id: string, edit: TaskEdit): Promise<Task> {
   if (edit.estimatedHours !== undefined)
     patch.estimated_hours = edit.estimatedHours;
   if (edit.actualHours !== undefined) patch.actual_hours = edit.actualHours;
+  // start_date only when provided. project_id is intentionally NOT touched here
+  // (the project switcher in PR3 moves it). baseline_* is written only to freeze
+  // a still-empty baseline (see freezeBaseline); an already-frozen one is never
+  // sent by the caller, so a replan can't move the lightning-line target.
+  if (edit.startDate !== undefined) patch.start_date = edit.startDate || null;
+  if (edit.baselineStart !== undefined)
+    patch.baseline_start = edit.baselineStart;
+  if (edit.baselineDue !== undefined) patch.baseline_due = edit.baselineDue;
 
   const { data, error } = await supabase
     .from("tasks")
@@ -485,4 +521,22 @@ export function estimateAchievement(
   }
   if (count === 0 || act <= 0) return null;
   return { ratio: est / act, count };
+}
+
+/**
+ * Freeze-once baseline (要確認-4 / PR2 整合性修正): compute which baseline fields
+ * to fill on save. Only an *empty* baseline is filled — from the current
+ * start/due — so a task created without dates, then dated later, still gets a
+ * baseline; an already-frozen baseline is left alone (never overwritten by a
+ * replan). Returns just the fields to set, ready to spread into a TaskEdit.
+ */
+export function freezeBaseline(
+  task: { baseline_start: string | null; baseline_due: string | null },
+  startDate: string | null | undefined,
+  dueDate: string | null | undefined,
+): { baselineStart?: string; baselineDue?: string } {
+  const out: { baselineStart?: string; baselineDue?: string } = {};
+  if (task.baseline_start == null && startDate) out.baselineStart = startDate;
+  if (task.baseline_due == null && dueDate) out.baselineDue = dueDate;
+  return out;
 }

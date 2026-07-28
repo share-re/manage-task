@@ -81,14 +81,21 @@ export async function PATCH(req: Request) {
   if (!userId)
     return Response.json({ error: "userId が必要です。" }, { status: 400 });
 
-  // Banning yourself locks the door from the inside, same as deleting yourself.
-  // Demoting yourself is left allowed — stepping down is a real thing to do,
-  // and the last-admin guard below still keeps someone in charge.
-  if (banned === true && userId === g.userId)
-    return Response.json(
-      { error: "自分のアカウントは無効化できません。" },
-      { status: 400 },
-    );
+  // You cannot ban, demote or delete yourself: each one locks the door from
+  // the inside, and an admin who did it by accident could not undo it. Another
+  // admin has to make the change. Editing your own display name is still fine.
+  if (userId === g.userId) {
+    if (banned === true)
+      return Response.json(
+        { error: "自分のアカウントは無効化できません。" },
+        { status: 400 },
+      );
+    if (role === "admin" || role === "general")
+      return Response.json(
+        { error: "自分のロールは変更できません。ほかの管理者に依頼してください。" },
+        { status: 400 },
+      );
+  }
 
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   if (name !== undefined) {

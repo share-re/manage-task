@@ -617,24 +617,26 @@ export default function AdminUsersPage() {
                                 </span>
                               ) : (
                                 <>
-                                  <button
-                                    disabled={rowBusy}
-                                    onClick={() =>
-                                      patch(u.id, {
-                                        role: u.role === "admin" ? "general" : "admin",
-                                      })
-                                    }
-                                    className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
-                                    style={{ border: `1px solid ${C.line}`, color: C.ink }}
-                                  >
-                                    {u.role === "admin" ? "一般にする" : "管理者にする"}
-                                  </button>
-                                  {/* Banning or deleting yourself would lock the
-                                      caller out mid-session, so neither is
-                                      offered on your own row (nor allowed by
-                                      the API). Demoting yourself still is. */}
+                                  {/* Role, ban and delete all lock the caller
+                                      out of administration if aimed at their
+                                      own row, and an accidental one could not
+                                      be undone — another admin has to do it.
+                                      The API refuses these too. Editing your
+                                      own display name stays available. */}
                                   {!isSelf && (
                                     <>
+                                      <button
+                                        disabled={rowBusy}
+                                        onClick={() =>
+                                          patch(u.id, {
+                                            role: u.role === "admin" ? "general" : "admin",
+                                          })
+                                        }
+                                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                        style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                                      >
+                                        {u.role === "admin" ? "一般にする" : "管理者にする"}
+                                      </button>
                                       <button
                                         disabled={rowBusy}
                                         onClick={() => patch(u.id, { banned: !u.banned })}
@@ -659,7 +661,7 @@ export default function AdminUsersPage() {
                                   )}
                                   {isSelf && (
                                     <span className="text-xs" style={{ color: C.muted }}>
-                                      🔒 自分のアカウントは無効化・削除できません
+                                      🔒 自分のロール変更・無効化・削除はできません
                                     </span>
                                   )}
                                 </>

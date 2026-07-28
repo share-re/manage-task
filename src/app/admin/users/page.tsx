@@ -123,6 +123,8 @@ export default function AdminUsersPage() {
   // Inline display-name editing: which row is open, and its draft value.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
+  // The account the delete dialog is asking about. Null while it is closed.
+  const [confirmDelete, setConfirmDelete] = useState<ManagedUser | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -148,11 +150,15 @@ export default function AdminUsersPage() {
 
   // Tasks drive the "担当タスク" column and the data-health counts. A failure
   // here must not break user management, so it degrades to zero counts.
-  useEffect(() => {
+  const loadTasks = useCallback(() => {
     listTasks()
       .then(setTasks)
       .catch(() => setTasks([]));
   }, []);
+
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
 
   const adminCount = users.filter((u) => u.role === "admin").length;
 
@@ -222,6 +228,37 @@ export default function AdminUsersPage() {
       setNotice(
         "仮の表示名を設定しました。タスク一覧の担当者名にも反映されます。本人が自分で設定すると「仮」が外れます。",
       );
+    }
+  }
+
+  async function removeUser(u: ManagedUser) {
+    if (!token) return;
+    setBusy(u.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId: u.id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "削除に失敗しました。");
+      setConfirmDelete(null);
+      await load();
+      loadTasks();
+      setNotice(
+        json.movedTasks > 0
+          ? `アカウントを削除しました。担当していた ${json.movedTasks} 件のタスクには「${json.label}」が担当者名として残ります。`
+          : "アカウントを削除しました。",
+      );
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -469,6 +506,7 @@ export default function AdminUsersPage() {
                       const attn = !u.name;
                       // Owner-set names are off limits to admins (see the API).
                       const canEditName = !u.name || u.provisional;
+                      const isSelf = session?.user.id === u.id;
                       return (
                         <tr
                           key={u.id}
@@ -603,6 +641,17 @@ export default function AdminUsersPage() {
                                   >
                                     {u.banned ? "有効に戻す" : "無効化"}
                                   </button>
+                                  {/* Self-deletion would lock the caller out mid-session. */}
+                                  {!isSelf && (
+                                    <button
+                                      disabled={rowBusy}
+                                      onClick={() => setConfirmDelete(u)}
+                                      className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                      style={{ border: `1px solid ${C.danger}`, color: C.danger }}
+                                    >
+                                      削除
+                                    </button>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -643,6 +692,113 @@ export default function AdminUsersPage() {
           </section>
         </div>
       </div>
+
+      {/* Deletion is irreversible and reaches beyond this screen, so the dialog
+          spells out what goes and points at 無効化 as the reversible option. */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-5"
+          style={{ background: "rgba(12,20,10,.45)" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmDelete(null);
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="del-title"
+        >
+          <div
+            className="w-full max-w-[520px] px-5 py-5"
+            style={{ ...CARD_STYLE, boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}
+          >
+            <h3 id="del-title" className="mb-1.5 text-[1.02rem] font-extrabold">
+              本当にこのアカウントを削除しますか？
+            </h3>
+            <p className="mb-3.5 text-[0.86rem]" style={{ color: C.muted }}>
+              この操作は<b style={{ color: C.danger }}>元に戻せません</b>。
+            </p>
+
+            <div
+              className="rounded-xl px-3.5 py-3 text-[0.85rem]"
+              style={{ background: C.card2, border: `1px solid ${C.line}` }}
+            >
+              <div className="flex justify-between gap-2.5 py-1">
+                <span className="font-bold" style={{ color: C.muted }}>
+                  表示名
+                </span>
+                <span className="font-bold">
+                  {confirmDelete.name ?? "（未設定）"}
+                </span>
+              </div>
+              <div
+                className="flex justify-between gap-2.5 py-1"
+                style={{ borderTop: `1px dashed ${C.line}` }}
+              >
+                <span className="font-bold" style={{ color: C.muted }}>
+                  ログインアカウント
+                </span>
+                <span className="font-mono text-[0.8rem]">
+                  {confirmDelete.email ?? "—"}
+                </span>
+              </div>
+              <div
+                className="flex justify-between gap-2.5 py-1"
+                style={{ borderTop: `1px dashed ${C.line}` }}
+              >
+                <span className="font-bold" style={{ color: C.muted }}>
+                  担当タスク
+                </span>
+                <span className="font-bold tabular-nums">
+                  {taskCountById.get(confirmDelete.id) ?? 0} 件
+                </span>
+              </div>
+            </div>
+
+            <div
+              className="mt-3 rounded-xl px-3 py-2.5 text-[0.84rem]"
+              style={{ background: C.warnBg }}
+            >
+              <b style={{ color: C.warn }}>削除すると：</b>
+              <ul className="mt-1 list-disc pl-5">
+                <li>
+                  担当していたタスクには、担当者名が
+                  <b>「{confirmDelete.name ?? confirmDelete.email ?? "削除されたユーザー"}」</b>
+                  という文字だけ残ります（一覧の表示は変わりません）
+                </li>
+                <li>
+                  そのユーザーの<b>AI内田さんの会話履歴も一緒に消えます</b>
+                </li>
+                <li>ログインもできなくなり、同じアカウントには戻せません</li>
+              </ul>
+            </div>
+
+            <p
+              className="mt-3 rounded-xl px-3 py-2.5 text-[0.82rem]"
+              style={{ background: C.card2, border: `1px dashed ${C.line}`, color: C.muted }}
+            >
+              <b style={{ color: C.ink }}>一時的に止めたいだけなら「無効化」</b>を使ってください。
+              ログインだけ止まり、記録は残り、あとから元に戻せます。
+            </p>
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="rounded-xl px-4 py-2 text-sm font-bold"
+                style={{ border: `1px solid ${C.line}`, color: C.ink, background: C.card }}
+              >
+                キャンセル
+              </button>
+              <button
+                disabled={busy === confirmDelete.id}
+                onClick={() => removeUser(confirmDelete)}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                style={{ background: C.danger }}
+              >
+                {busy === confirmDelete.id ? "削除中…" : "削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

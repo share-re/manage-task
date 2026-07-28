@@ -169,3 +169,96 @@ export async function PATCH(req: Request) {
   }
   return Response.json({ ok: true });
 }
+
+// Delete an account for good. Banning is the reversible option and the one that
+// keeps history readable, so this is deliberately the narrower path: it refuses
+// to strand the team (last admin) or the caller (self), and it preserves the
+// name on past tasks before the account that owns it disappears.
+export async function DELETE(req: Request) {
+  const g = await requireAdmin(req);
+  if (!g.ok) return Response.json({ error: g.error }, { status: g.status });
+
+  const { userId } = (await req.json().catch(() => ({}))) as { userId?: string };
+  if (!userId)
+    return Response.json({ error: "userId が必要です。" }, { status: 400 });
+  if (userId === g.userId)
+    return Response.json(
+      { error: "自分のアカウントは削除できません。" },
+      { status: 400 },
+    );
+
+  const supabaseAdmin = getSupabaseAdmin();
+
+  const { data: target, error: tErr } =
+    await supabaseAdmin.auth.admin.getUserById(userId);
+  if (tErr || !target.user)
+    return Response.json(
+      { error: "対象のユーザーが見つかりません。" },
+      { status: 404 },
+    );
+
+  // Same guard as PATCH: the team must never lose its last admin.
+  if (target.user.app_metadata?.role === "admin") {
+    const { data } = await supabaseAdmin.auth.admin.listUsers();
+    const admins = data.users.filter((u) => u.app_metadata?.role === "admin");
+    if (admins.length <= 1)
+      return Response.json(
+        { error: "最後の管理者は削除できません。" },
+        { status: 400 },
+      );
+  }
+
+  const { data: prof } = await supabaseAdmin
+    .from("profiles")
+    .select("name")
+    .eq("id", userId)
+    .maybeSingle();
+  const profName = (prof?.name as string | null) ?? null;
+  const label =
+    (
+      profName ??
+      (target.user.user_metadata?.name as string | undefined) ??
+      target.user.email ??
+      ""
+    ).trim() || "削除されたユーザー";
+
+  // Tasks point at the account by id, so once it is gone resolveAssigneeLabel
+  // can no longer name the assignee. Move the name into the legacy assignee
+  // string first — that column exists as the fallback for exactly this case.
+  const { data: owned, error: oErr } = await supabaseAdmin
+    .from("tasks")
+    .select("id, assignee")
+    .eq("assignee_id", userId);
+  if (oErr) return Response.json({ error: oErr.message }, { status: 500 });
+  const ownedIds = (owned ?? []).map((t) => t.id as string);
+
+  if (ownedIds.length) {
+    const { error: mErr } = await supabaseAdmin
+      .from("tasks")
+      .update({ assignee: label, assignee_id: null })
+      .in("id", ownedIds);
+    if (mErr) return Response.json({ error: mErr.message }, { status: 500 });
+  }
+
+  // Remove the profiles row explicitly instead of trusting a cascade this repo
+  // cannot see: a leftover row would keep the deleted account in the picker.
+  await supabaseAdmin.from("profiles").delete().eq("id", userId);
+
+  const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+  if (error) {
+    // There are no transactions across auth and the tables, so undo by hand
+    // rather than leaving the account alive with its tasks detached.
+    for (const t of owned ?? [])
+      await supabaseAdmin
+        .from("tasks")
+        .update({ assignee_id: userId, assignee: t.assignee ?? null })
+        .eq("id", t.id as string);
+    await supabaseAdmin.from("profiles").upsert({ id: userId, name: profName });
+    return Response.json(
+      { error: `削除に失敗しました（変更は元に戻しました）: ${error.message}` },
+      { status: 500 },
+    );
+  }
+
+  return Response.json({ ok: true, label, movedTasks: ownedIds.length });
+}

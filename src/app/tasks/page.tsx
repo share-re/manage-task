@@ -1145,10 +1145,10 @@ export default function TasksPage() {
     <div className="relative flex-1" style={{ colorScheme: "light" }}>
       {/* 植林（/forest）トーンの背景。AI内田さん（/assistant）と共通のコンポーネント。 */}
       <ForestBackground />
-      {/* 仮のサイドバー。本来のサイドバー（案件切替・各機能へのナビ）が入るまでの
-          置き場所。狭い画面では一覧の上に回る。 */}
+      {/* 仮のサイドバー。実画面のサイドバーが入るまでの置き場所で、
+          狭い画面では一覧の上に回る。 */}
       <div className="flex flex-col lg:flex-row lg:items-start">
-        <TaskNav />
+        <TaskNav onGenerated={reloadTasks} />
       <main className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>

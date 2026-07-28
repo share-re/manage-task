@@ -457,3 +457,32 @@ export function leafProgress(tasks: Task[]): {
 } {
   return taskProgress(leafTasks(tasks));
 }
+
+/**
+ * 見積り達成率 (estimate achievement, EVM-CPI-like): Σestimated ÷ Σactual over
+ * DONE tasks that carry both hours. 1.0 = right on estimate; above = faster.
+ * Returns null (「未計測」) when no task qualifies — estimates are optional, so
+ * the count n is included for the "based on n tasks" caption. Pass leaf tasks.
+ */
+export function estimateAchievement(
+  tasks: Task[],
+): { ratio: number; count: number } | null {
+  let est = 0;
+  let act = 0;
+  let count = 0;
+  for (const t of tasks) {
+    if (
+      t.status !== "done" ||
+      t.estimated_hours == null ||
+      t.estimated_hours <= 0 ||
+      t.actual_hours == null ||
+      t.actual_hours <= 0
+    )
+      continue;
+    est += t.estimated_hours;
+    act += t.actual_hours;
+    count++;
+  }
+  if (count === 0 || act <= 0) return null;
+  return { ratio: est / act, count };
+}

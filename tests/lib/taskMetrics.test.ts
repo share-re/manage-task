@@ -4,6 +4,7 @@ import {
   completionValue,
   productivity,
   leafProgress,
+  estimateAchievement,
   type Task,
 } from "../../src/lib/tasks";
 
@@ -88,6 +89,36 @@ describe("productivity（生産性＝成果ポイント÷実績時間）", () =>
       mk({ id: "b", status: "todo", priority: "mid", actual_hours: 5 }),
     ];
     expect(productivity(tasks)).toBeNull();
+  });
+});
+
+describe("estimateAchievement（見積り達成率＝見積h÷実績h）", () => {
+  it("完了かつ見積り・実績の両方があるタスクだけで算出する", () => {
+    const tasks = [
+      mk({ id: "a", status: "done", estimated_hours: 8, actual_hours: 6 }),
+      mk({ id: "b", status: "done", estimated_hours: 4, actual_hours: 6 }),
+      mk({ id: "c", status: "done", estimated_hours: null, actual_hours: 3 }), // 見積りなし→除外
+      mk({ id: "d", status: "todo", estimated_hours: 5, actual_hours: 5 }), // 未完了→除外
+    ];
+    // (8+4) / (6+6) = 1.0、対象は2件
+    expect(estimateAchievement(tasks)).toEqual({ ratio: 1, count: 2 });
+  });
+
+  it("見積りより速ければ 1.0 を上回る", () => {
+    const tasks = [
+      mk({ id: "a", status: "done", estimated_hours: 9, actual_hours: 6 }),
+    ];
+    expect(estimateAchievement(tasks)).toEqual({ ratio: 1.5, count: 1 });
+  });
+
+  it("対象が1件もなければ null（未計測）", () => {
+    expect(estimateAchievement([])).toBeNull();
+    expect(
+      estimateAchievement([
+        mk({ id: "a", status: "done", estimated_hours: null, actual_hours: 2 }),
+        mk({ id: "b", status: "done", estimated_hours: 3, actual_hours: null }),
+      ]),
+    ).toBeNull();
   });
 });
 

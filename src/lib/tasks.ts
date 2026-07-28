@@ -95,15 +95,19 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   done: STATUS_META.done.label,
 };
 
-// Presentation + sort order for task priority. A DB null is treated as "mid"
-// (未設定＝中) via normalizeTask, so the UI always has a concrete value.
+// Priority defaults. A DB null is treated as "mid" (未設定＝中) via
+// normalizeTask, so the UI always has a concrete value.
+//
+// The badge color used to live here too. It now belongs to the priority master
+// (@/lib/priorities), which reads the label and color from task_priorities and
+// falls back to the labels below — keeping one place per piece of information.
 export const PRIORITY_META: Record<
   TaskPriority,
-  { label: string; badgeClass: string; order: number; weight: number }
+  { label: string; order: number; weight: number }
 > = {
-  high: { label: "高", badgeClass: "bg-red-100 text-red-700", order: 0, weight: 3 },
-  mid: { label: "中", badgeClass: "bg-amber-100 text-amber-700", order: 1, weight: 2 },
-  low: { label: "低", badgeClass: "bg-zinc-100 text-zinc-600", order: 2, weight: 1 },
+  high: { label: "高", order: 0, weight: 3 },
+  mid: { label: "中", order: 1, weight: 2 },
+  low: { label: "低", order: 2, weight: 1 },
 };
 
 export const PRIORITY_ORDER: TaskPriority[] = [...TASK_PRIORITIES];

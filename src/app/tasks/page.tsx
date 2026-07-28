@@ -17,7 +17,6 @@ import {
   completeTask,
   STATUS_META,
   STATUS_ORDER,
-  PRIORITY_META,
   PRIORITY_ORDER,
   TASK_TYPE_META,
   TASK_TYPE_ORDER,
@@ -29,6 +28,11 @@ import {
   type TaskPriority,
   type TaskType,
 } from "@/lib/tasks";
+import {
+  DEFAULT_PRIORITY_META,
+  loadPriorityMeta,
+  type PriorityMetaMap,
+} from "@/lib/priorities";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
@@ -106,6 +110,7 @@ function TaskRow({
   onDelete,
   members,
   labelById,
+  priorityMeta,
   onSave,
 }: {
   task: Task;
@@ -120,6 +125,8 @@ function TaskRow({
   onDelete: (task: Task) => void;
   members: Member[];
   labelById: Map<string, string>;
+  // Priority labels/colors from the master table (see @/lib/priorities).
+  priorityMeta: PriorityMetaMap;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
@@ -244,9 +251,9 @@ function TaskRow({
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
             <span
-              className={`rounded px-1.5 py-0.5 font-medium ${PRIORITY_META[task.priority].badgeClass}`}
+              className={`rounded px-1.5 py-0.5 font-medium ${priorityMeta[task.priority].badgeClass}`}
             >
-              {PRIORITY_META[task.priority].label}
+              {priorityMeta[task.priority].label}
             </span>
             <span>
               {resolveAssigneeLabel(task, labelById) || "担当者なし"} ・{" "}
@@ -363,7 +370,7 @@ function TaskRow({
                 >
                   {PRIORITY_ORDER.map((p) => (
                     <option key={p} value={p}>
-                      {PRIORITY_META[p].label}
+                      {priorityMeta[p].label}
                     </option>
                   ))}
                 </select>
@@ -575,6 +582,10 @@ export default function TasksPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Registered users for the assignee picker (from the profiles table).
   const [members, setMembers] = useState<Member[]>([]);
+  // Priority labels/colors from the master table. Starts as the compiled-in
+  // defaults so the first paint matches what loads a moment later.
+  const [priorityMeta, setPriorityMeta] =
+    useState<PriorityMetaMap>(DEFAULT_PRIORITY_META);
   // profiles.id -> current display label, used to render task.assignee_id.
   const labelById = useMemo(() => {
     const m = new Map<string, string>();
@@ -656,6 +667,12 @@ export default function TasksPage() {
     listMembers()
       .then(setMembers)
       .catch((err) => console.error("メンバー一覧の読み込みに失敗:", err));
+
+    // Priority master. loadPriorityMeta already falls back to the defaults, so
+    // a missing task_priorities table leaves the badges exactly as they were.
+    loadPriorityMeta()
+      .then(setPriorityMeta)
+      .catch((err) => console.error("優先度マスタの読み込みに失敗:", err));
   }, []);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
@@ -1008,7 +1025,7 @@ export default function TasksPage() {
       status: (a, b) =>
         STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
       priority: (a, b) =>
-        PRIORITY_META[a.priority].order - PRIORITY_META[b.priority].order,
+        priorityMeta[a.priority].order - priorityMeta[b.priority].order,
     };
     if (sortKey !== "default") list.sort(comparators[sortKey]);
     return list;
@@ -1074,6 +1091,7 @@ export default function TasksPage() {
       onDelete={handleDelete}
       members={members}
       labelById={labelById}
+      priorityMeta={priorityMeta}
       onSave={handleUpdate}
     />
   );
@@ -1279,7 +1297,7 @@ export default function TasksPage() {
             <option value="">優先度：すべて</option>
             {PRIORITY_ORDER.map((p) => (
               <option key={p} value={p}>
-                {PRIORITY_META[p].label}
+                {priorityMeta[p].label}
               </option>
             ))}
           </select>
@@ -1430,7 +1448,7 @@ export default function TasksPage() {
               >
                 {PRIORITY_ORDER.map((p) => (
                   <option key={p} value={p}>
-                    {PRIORITY_META[p].label}
+                    {priorityMeta[p].label}
                   </option>
                 ))}
               </select>

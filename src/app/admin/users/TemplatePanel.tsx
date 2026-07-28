@@ -97,32 +97,6 @@ export default function TemplatePanel() {
         ))}
       </div>
 
-      <p
-        className="mt-3.5 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>編集はまだできません。</b>
-        雛形の編集は、子タスクの追加・削除・並べ替えを伴うので、
-        表示名を直すだけの他のマスタとは別の画面になります。
-        テーブルを作ったうえで次に着手します。
-      </p>
-      <p
-        className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>見積時間は雛形に持たせていません。</b>
-        適当な見積を入れると、そのまま
-        <b style={{ color: C.ink }}>工数効率（見積 ÷ 実績）</b>
-        に流れ込んで数字を歪めるためです。担当者・期限も空のまま作られます。
-      </p>
     </section>
   );
 }

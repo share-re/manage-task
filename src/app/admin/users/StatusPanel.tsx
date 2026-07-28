@@ -15,8 +15,11 @@ import {
 import { C, CARD_STYLE } from "./theme";
 
 /**
- * 状態マスタ. Label and color only — see the note at the bottom of the panel
- * for why the set of statuses itself cannot be edited here.
+ * 状態マスタ. Label and color only.
+ *
+ * The set of statuses is not editable, and "done" least of all: progress,
+ * archiving, the forest, the parent/child sync and the actual-hours rule all
+ * test for it directly, so moving it would quietly break the progress figure.
  */
 export default function StatusPanel({ tasks }: { tasks: Task[] }) {
   const { session } = useAuth();
@@ -96,8 +99,9 @@ export default function StatusPanel({ tasks }: { tasks: Task[] }) {
       </div>
       <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
         変えられるのは<b style={{ color: C.ink }}>表示名と色だけ</b>です。
-        状態を増やしたり、<b style={{ color: C.ink }}>どれを「完了」として扱うかを変えることはできません</b>
-        （理由は下の注記）。
+        状態を増やしたり、
+        <b style={{ color: C.ink }}>どれを「完了」として扱うかを変えることはできません</b>
+        （進捗率・アーカイブ・植林の判定が「完了」に直接つながっているため）。
       </p>
 
       {notice && (
@@ -271,37 +275,6 @@ export default function StatusPanel({ tasks }: { tasks: Task[] }) {
         </table>
       </div>
 
-      <p
-        className="mt-3.5 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>「完了扱い」を変えられないのはなぜ？</b>
-        「完了」であることは、アプリの中の
-        <b style={{ color: C.ink }}>約25か所</b>
-        で直接判定されています ── 進捗率、アーカイブ、植林（木が育つ判定）、オフィス画面、
-        親タスクの自動完了、完了時の実績時間の必須チェックなど。
-        ここを画面から切り替えられるようにすると
-        <b style={{ color: C.ink }}>進捗率が静かに壊れる</b>
-        危険があるため、あえて固定しています。
-      </p>
-      <p
-        className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>状態には色が2つあります。</b>
-        バッジの色と、タスク行の<b style={{ color: C.ink }}>左端の縦線</b>の色です。
-        1つの色を選ぶと両方が決まります（上のプレビューが実際の見え方です）。
-        表示名を変えると、タスク一覧・プルダウン・
-        <b style={{ color: C.ink }}>定期サマリメール</b>にも反映されます。
-      </p>
     </section>
   );
 }

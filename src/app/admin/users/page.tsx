@@ -597,35 +597,6 @@ export default function AdminUsersPage() {
               </table>
             </div>
 
-            <p
-              className="mt-3.5 rounded-xl px-3 py-2.5 text-[0.82rem]"
-              style={{ background: C.card2, border: `1px dashed ${C.line}`, color: C.muted }}
-            >
-              <b style={{ color: C.ink }}>名前は本人のものです。</b>
-              管理者が触れるのは、<b style={{ color: C.ink }}>表示名が未設定の人</b>と、
-              <b style={{ color: C.ink }}>まだ「仮」のままの人</b>だけです（打ち間違いを直せるようにするため）。
-              本人がオフィス画面で自分の名前を保存すると「仮」が外れ、以後は管理者からも変更できなくなります。
-            </p>
-            <p
-              className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
-              style={{ background: C.card2, border: `1px dashed ${C.line}`, color: C.muted }}
-            >
-              <b style={{ color: C.ink }}>表示名の反映先：</b>
-              タスクの担当者プルダウン・担当者での絞り込み・定期サマリメールの「担当:」欄。
-              変更すると、これらすべてに同じ名前が出ます。
-            </p>
-            <p
-              className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
-              style={{ background: C.card2, border: `1px dashed ${C.line}`, color: C.muted }}
-            >
-              <b style={{ color: C.ink }}>無効化について：</b>
-              無効にしたメンバーはログインできなくなりますが、
-              <b style={{ color: C.ink }}>過去タスクの担当者名はそのまま残ります</b>（削除ではないため）。
-              「有効に戻す」でいつでも復帰でき、パスワードもそのまま使えます。
-              ただし<b style={{ color: C.ink }}>メールアドレスは空きません</b>
-              ── アカウント自体は残っているので、同じアドレスで新しく招待することはできません。
-              アドレスを再利用したい場合だけ、削除を使ってください。
-            </p>
           </section>
           )}
         </div>

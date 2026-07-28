@@ -13,7 +13,11 @@ import { C, CARD_STYLE } from "./theme";
 
 /**
  * 種別マスタ. Labels only — a task type has no color anywhere in the UI yet.
- * This is the tab the mock called カテゴリ; see the note at the bottom.
+ *
+ * This is the tab the proposal mock called カテゴリ. Its suggested values
+ * largely repeated task_type, and "which project is this for" is getting its
+ * own layer (projects), so a third classification axis was folded into the one
+ * that already exists.
  */
 export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
   const { session } = useAuth();
@@ -226,36 +230,6 @@ export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
         </table>
       </div>
 
-      <p
-        className="mt-3.5 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>「カテゴリ」ではなく「種別」なのはなぜ？</b>
-        提案時のモックには「カテゴリ（開発／テスト／資料作成／運用・保守）」がありましたが、
-        中身がこの種別とほぼ重なります。さらに「どの案件の作業か」は
-        <b style={{ color: C.ink }}>案件（projects）</b>
-        として別に用意する予定です。
-        分類の軸を3本にすると登録時に毎回3つ選ぶことになり、結局どれも埋まらなくなるため、
-        <b style={{ color: C.ink }}>既にある種別に一本化</b>しました。
-        別軸が本当に必要になったら、そのとき追加できます。
-      </p>
-      <p
-        className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>色がないのはなぜ？</b>
-        種別はいま<b style={{ color: C.ink }}>プルダウンにしか出ていません</b>
-        （タスク一覧にバッジとして表示されていない）ので、色を置く場所がありません。
-        ダッシュボードで種別ごとの集計を出すようになったら、そのとき色を足します。
-      </p>
     </section>
   );
 }

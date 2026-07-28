@@ -97,10 +97,9 @@ export default function PriorityPanel({ tasks }: { tasks: Task[] }) {
         </span>
       </div>
       <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
-        これまで<b style={{ color: C.ink }}>コードの中に直接書いてあった</b>
-        「高＝赤」を、この画面から変えられます。変えられるのは
-        <b style={{ color: C.ink }}>表示名と色だけ</b>で、
-        <b style={{ color: C.ink }}>段階の増減はできません</b>（理由は下の注記）。
+        変えられるのは<b style={{ color: C.ink }}>表示名と色だけ</b>です。
+        <b style={{ color: C.ink }}>段階の増減はできません</b>
+        （タスクに保存される値がDB側で3つに制限されているため）。
       </p>
 
       {notice && (
@@ -261,35 +260,6 @@ export default function PriorityPanel({ tasks }: { tasks: Task[] }) {
         </table>
       </div>
 
-      <p
-        className="mt-3.5 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>段階を増やせないのはなぜ？</b>
-        優先度には <span className="font-mono">high / mid / low</span>{" "}
-        という英語のコードがあり、これがタスク1件ごとに保存されています。表示名の「高」は
-        <b style={{ color: C.ink }}>その見せ方にすぎません</b>
-        。4つ目を足すにはDB側のルール変更と既存データの移行が必要なので、
-        まずは表示名と色だけを変えられる形にしています。
-      </p>
-      <p
-        className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
-        style={{
-          background: C.card2,
-          border: `1px dashed ${C.line}`,
-          color: C.muted,
-        }}
-      >
-        <b style={{ color: C.ink }}>色が選択式なのはなぜ？</b>
-        このアプリの色は Tailwind
-        で付いていて、ソースコードに書かれた色しかCSSに出力されません。自由に色名を入力できるようにすると
-        <b style={{ color: C.ink }}>そのCSSが存在せず、色が付かなくなります</b>
-        。副産物として、文字が読めない配色を作れなくなります。
-      </p>
     </section>
   );
 }

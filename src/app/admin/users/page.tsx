@@ -36,31 +36,6 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-function Finding({
-  n,
-  label,
-  tone,
-}: {
-  n: number;
-  label: string;
-  tone: "bad" | "warn" | "calm";
-}) {
-  const color = tone === "bad" ? C.danger : tone === "warn" ? C.warn : C.muted;
-  return (
-    <li
-      className="rounded-xl px-3 py-2.5"
-      style={{ background: C.card2, border: `1px solid ${C.line}` }}
-    >
-      <div className="text-2xl font-extrabold tabular-nums leading-tight" style={{ color }}>
-        {n}
-      </div>
-      <div className="text-xs font-semibold" style={{ color: C.muted }}>
-        {label}
-      </div>
-    </li>
-  );
-}
-
 export default function AdminUsersPage() {
   const { session } = useAuth();
   const token = session?.access_token;
@@ -101,8 +76,8 @@ export default function AdminUsersPage() {
     load();
   }, [load]);
 
-  // Tasks drive the "担当タスク" column and the data-health counts. A failure
-  // here must not break user management, so it degrades to zero counts.
+  // Tasks drive the "担当タスク" column and the per-panel usage counts. A
+  // failure here must not break user management, so it degrades to zero.
   const loadTasks = useCallback(() => {
     listTasks()
       .then(setTasks)
@@ -121,18 +96,6 @@ export default function AdminUsersPage() {
       if (t.assignee_id) m.set(t.assignee_id, (m.get(t.assignee_id) ?? 0) + 1);
     return m;
   }, [tasks]);
-
-  const health = useMemo(() => {
-    // A task whose assignee is still only a free-text string: it predates
-    // assignee_id and is what makes raw addresses show up on the task list.
-    const legacy = tasks.filter((t) => !t.assignee_id && t.assignee).length;
-    return {
-      noName: users.filter((u) => !u.name).length,
-      provisional: users.filter((u) => u.provisional).length,
-      legacy,
-      unassigned: tasks.filter((t) => !t.assignee_id && !t.assignee).length,
-    };
-  }, [users, tasks]);
 
   async function patch(
     userId: string,
@@ -242,21 +205,24 @@ export default function AdminUsersPage() {
     }
   }
 
-  const needsAttention = health.noName;
+  // Members with no display name at all — the count in the panel subtitle.
+  const needsAttention = users.filter((u) => !u.name).length;
 
   return (
     <main
-      className="min-h-screen pb-14"
+      className="flex min-h-screen flex-col pb-14 md:h-screen md:overflow-hidden md:pb-0"
       style={{
         color: C.ink,
         background: `linear-gradient(180deg,#dceffb 0,#f3faff 180px,${C.card2} 180px)`,
       }}
     >
-      {/* App bar — breadcrumb + actions, mirroring the /tasks header. Sticky and
-          full width: pinned inside the centred column would leave the page
-          scrolling past in the margins beside it. */}
+      {/* App bar — breadcrumb + actions, mirroring the /tasks header. Full
+          width rather than inside the centred column, or the page would scroll
+          past in the margins beside it. shrink-0 keeps it its own height from
+          md up, where it is a flex row that never scrolls; sticky is what
+          holds it in place below md, where the page scrolls normally. */}
       <div
-        className="sticky top-0 z-30"
+        className="sticky top-0 z-30 shrink-0"
         style={{
           background: "rgba(243,250,255,.92)",
           backdropFilter: "blur(6px)",
@@ -299,54 +265,15 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1120px] px-5 pt-5">
-        {/* Why this screen exists */}
-        <div className="mb-4 px-5 py-4 text-[0.93rem]" style={CARD_STYLE}>
-          <p>
-            <strong style={{ color: C.accentInk }}>ねらい：</strong>
-            タスクの担当者名は、この画面の<strong>表示名</strong>がそのまま使われます。
-            表示名が空のメンバーは、担当者欄に<strong>メールアドレスがそのまま出ます</strong>。
-            ここで設定すれば、タスク一覧にも定期サマリメールにも反映されます。
-          </p>
-          <p className="mt-2 text-[0.86rem]" style={{ color: C.muted }}>
-            管理者が設定できるのは<b style={{ color: C.ink }}>「未設定の人の仮の表示名」だけ</b>です。
-            本人が自分で設定した表示名は、管理者からは変更できません。
-          </p>
-        </div>
-
-        {/* Data health — the numbers that say whether this screen has work to
-            do. Shown on every tab, not just the one they describe: hiding it
-            moved the tab list up and down as you switched, and a header that
-            jumps is worse than one number being irrelevant to the open tab. */}
-        <div
-          className="mb-5 px-5 py-4"
-          style={{ ...CARD_STYLE, borderLeft: `5px solid ${C.warn}` }}
+      {/* From md up the page itself does not scroll: the app bar and the tab
+          list keep their place and only the panel column moves. Below md there
+          is no side to pin anything to, so it falls back to page scroll. */}
+      <div className="mx-auto grid w-full max-w-[1120px] gap-4 px-5 pt-4 md:min-h-0 md:flex-1 md:grid-cols-[244px_1fr]">
+        <nav
+          className="self-start p-2.5"
+          style={CARD_STYLE}
+          aria-label="マスタの種類"
         >
-          <h2 className="mb-2.5 text-[0.95rem] font-extrabold">
-            ⚠ いまのデータの状態
-          </h2>
-          <ul className="grid list-none grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-2.5 p-0">
-            <Finding n={health.noName} label="表示名が未設定のメンバー" tone="bad" />
-            <Finding n={health.provisional} label="仮の表示名のままのメンバー" tone="warn" />
-            <Finding n={health.legacy} label="担当者が旧表記のままのタスク" tone="warn" />
-            <Finding n={health.unassigned} label="担当者なしのタスク" tone="calm" />
-          </ul>
-          <p className="mt-3 text-[0.8rem]" style={{ color: C.muted }}>
-            「旧表記のまま」が 0 件なら、過去データの移行（名寄せ）は不要です。
-            「仮の表示名」は、本人がオフィス画面で自分の名前を保存すると自動で解消されます。
-          </p>
-        </div>
-
-        <div className="grid items-start gap-4 md:grid-cols-[244px_1fr]">
-          {/* Master categories. Only members exists today. */}
-          {/* Pinned below the app bar so the tab list stays reachable while a
-              long panel scrolls. Single-column below md, where there is no
-              side to pin it to. */}
-          <nav
-            className="p-2.5 md:sticky md:top-[80px]"
-            style={CARD_STYLE}
-            aria-label="マスタの種類"
-          >
             <h3
               className="mx-2 mb-2 mt-1.5 text-[0.72rem] font-extrabold uppercase tracking-[0.09em]"
               style={{ color: C.muted }}
@@ -379,8 +306,10 @@ export default function AdminUsersPage() {
                 {t.label}
               </button>
             ))}
-          </nav>
+        </nav>
 
+        {/* The only thing that scrolls from md up. */}
+        <div className="pb-5 md:min-h-0 md:overflow-y-auto">
           {tab === "priority" && <PriorityPanel tasks={tasks} />}
           {tab === "status" && <StatusPanel tasks={tasks} />}
           {tab === "taskType" && <TaskTypePanel tasks={tasks} />}

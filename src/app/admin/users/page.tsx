@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { listTasks, type Task } from "@/lib/tasks";
+import { C, CARD_STYLE, Pill } from "./theme";
+import PriorityPanel from "./PriorityPanel";
 
 type ManagedUser = {
   id: string;
@@ -16,72 +18,21 @@ type ManagedUser = {
   created_at: string;
 };
 
-// Palette lifted from the master-screen mock so this page reads as part of the
-// same family as /tasks. Kept as constants rather than Tailwind classes because
-// the surrounding admin code already styles with inline colors.
-const C = {
-  card: "#ffffff",
-  card2: "#f7faf5",
-  ink: "#1c2419",
-  muted: "#6b7568",
-  line: "#e4ebdf",
-  accent: "#3b6d11",
-  accentSoft: "#eaf3de",
-  accentInk: "#173404",
-  danger: "#b91c1c",
-  dangerBg: "#fee2e2",
-  warn: "#c2410c",
-  warnBg: "#ffedd5",
-  info: "#1d4ed8",
-  infoBg: "#dbeafe",
-};
-const SHADOW = "0 1px 2px rgba(31,50,25,.06), 0 8px 24px rgba(31,50,25,.08)";
 const NAME_MAX = 20;
 
-const CARD_STYLE: React.CSSProperties = {
-  background: C.card,
-  border: `1px solid ${C.line}`,
-  borderRadius: 16,
-  boxShadow: SHADOW,
-};
-
-// The other master tabs from the mock. They have no data behind them yet, so
-// they render disabled rather than linking somewhere that doesn't exist.
+// Master tabs that have no data behind them yet. They render disabled rather
+// than linking somewhere that doesn't exist.
 const PLANNED_TABS = [
-  { emoji: "🚩", label: "優先度" },
   { emoji: "📊", label: "状態" },
   { emoji: "🏷", label: "カテゴリ" },
   { emoji: "📋", label: "定型タスク" },
   { emoji: "✉️", label: "共有先" },
 ];
 
+type MasterTab = "member" | "priority";
+
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
-}
-
-function Pill({
-  children,
-  bg,
-  color,
-  outlined,
-}: {
-  children: React.ReactNode;
-  bg: string;
-  color: string;
-  outlined?: boolean;
-}) {
-  return (
-    <span
-      className="inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-extrabold"
-      style={{
-        background: bg,
-        color,
-        border: outlined ? `1px solid ${C.line}` : undefined,
-      }}
-    >
-      {children}
-    </span>
-  );
 }
 
 function Finding({
@@ -125,6 +76,7 @@ export default function AdminUsersPage() {
   const [nameDraft, setNameDraft] = useState("");
   // The account the delete dialog is asking about. Null while it is closed.
   const [confirmDelete, setConfirmDelete] = useState<ManagedUser | null>(null);
+  const [tab, setTab] = useState<MasterTab>("member");
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -350,7 +302,9 @@ export default function AdminUsersPage() {
           </p>
         </div>
 
-        {/* Data health — the numbers that say whether this screen has work to do */}
+        {/* Data health — the numbers that say whether this screen has work to
+            do. These count members and assignees, so they belong to that tab. */}
+        {tab === "member" && (
         <div
           className="mb-5 px-5 py-4"
           style={{ ...CARD_STYLE, borderLeft: `5px solid ${C.warn}` }}
@@ -369,6 +323,7 @@ export default function AdminUsersPage() {
             「仮の表示名」は、本人がオフィス画面で自分の名前を保存すると自動で解消されます。
           </p>
         </div>
+        )}
 
         <div className="grid items-start gap-4 md:grid-cols-[244px_1fr]">
           {/* Master categories. Only members exists today. */}
@@ -379,13 +334,28 @@ export default function AdminUsersPage() {
             >
               マスタ
             </h3>
-            <div
-              className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-[0.86rem] font-bold text-white"
-              style={{ background: C.accent }}
-              aria-current="page"
-            >
-              <span className="w-[1.15em] text-center">👤</span>メンバー
-            </div>
+            {(
+              [
+                { key: "member", emoji: "👤", label: "メンバー" },
+                { key: "priority", emoji: "🚩", label: "優先度" },
+              ] as { key: MasterTab; emoji: string; label: string }[]
+            ).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                aria-current={tab === t.key ? "page" : undefined}
+                className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[0.86rem] font-bold"
+                style={
+                  tab === t.key
+                    ? { background: C.accent, color: "#fff" }
+                    : { color: C.ink }
+                }
+              >
+                <span className="w-[1.15em] text-center">{t.emoji}</span>
+                {t.label}
+              </button>
+            ))}
             {PLANNED_TABS.map((t) => (
               <div
                 key={t.label}
@@ -401,6 +371,9 @@ export default function AdminUsersPage() {
             ))}
           </nav>
 
+          {tab === "priority" && <PriorityPanel tasks={tasks} />}
+
+          {tab === "member" && (
           <section className="px-5 py-4" style={CARD_STYLE}>
             <div className="mb-1 flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="text-[1.05rem] font-extrabold">👤 メンバー一覧</h2>
@@ -706,6 +679,7 @@ export default function AdminUsersPage() {
               アドレスを再利用したい場合だけ、削除を使ってください。
             </p>
           </section>
+          )}
         </div>
       </div>
 

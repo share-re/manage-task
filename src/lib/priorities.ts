@@ -65,6 +65,9 @@ export function isPriorityColor(value: unknown): value is PriorityColor {
   return typeof value === "string" && value in PRIORITY_COLORS;
 }
 
+// Badges sit inline in a dense task list, so a long label would wrap the row.
+export const PRIORITY_LABEL_MAX = 10;
+
 export type PriorityMeta = {
   label: string;
   color: PriorityColor;

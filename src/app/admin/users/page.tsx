@@ -465,13 +465,18 @@ export default function AdminUsersPage() {
                                 </button>
                               </div>
                             ) : u.name ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                {u.name}
+                              // 仮バッジは名前の上。横に並べると、その分だけ
+                              // 名前に使える幅が減り、日本語はどこでも改行
+                              // できるので「ほ／り／ち」と1文字ずつ縦に折れる。
+                              <span className="flex flex-col items-start gap-0.5">
                                 {u.provisional && (
                                   <Pill bg={C.warnBg} color={C.warn}>
                                     仮
                                   </Pill>
                                 )}
+                                <span className="whitespace-nowrap">
+                                  {u.name}
+                                </span>
                               </span>
                             ) : (
                               <Pill bg={C.warnBg} color={C.warn}>

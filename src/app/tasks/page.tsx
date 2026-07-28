@@ -17,7 +17,6 @@ import {
   completeTask,
   STATUS_ORDER,
   PRIORITY_ORDER,
-  TASK_TYPE_META,
   TASK_TYPE_ORDER,
   DIFFICULTY_META,
   difficultyFromEstimate,
@@ -37,6 +36,11 @@ import {
   loadStatusMeta,
   type StatusMetaMap,
 } from "@/lib/statuses";
+import {
+  DEFAULT_TASK_TYPE_META,
+  loadTaskTypeMeta,
+  type TaskTypeMetaMap,
+} from "@/lib/taskTypes";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
@@ -116,6 +120,7 @@ function TaskRow({
   labelById,
   priorityMeta,
   statusMeta,
+  taskTypeMeta,
   onSave,
 }: {
   task: Task;
@@ -134,6 +139,8 @@ function TaskRow({
   priorityMeta: PriorityMetaMap;
   // Status labels/colors from the master table (see @/lib/statuses).
   statusMeta: StatusMetaMap;
+  // Task type labels from the master table (see @/lib/taskTypes).
+  taskTypeMeta: TaskTypeMetaMap;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
@@ -394,7 +401,7 @@ function TaskRow({
                   <option value="">種別なし</option>
                   {TASK_TYPE_ORDER.map((t) => (
                     <option key={t} value={t}>
-                      {TASK_TYPE_META[t].label}
+                      {taskTypeMeta[t].label}
                     </option>
                   ))}
                 </select>
@@ -595,6 +602,9 @@ export default function TasksPage() {
     useState<PriorityMetaMap>(DEFAULT_PRIORITY_META);
   const [statusMeta, setStatusMeta] =
     useState<StatusMetaMap>(DEFAULT_STATUS_META);
+  const [taskTypeMeta, setTaskTypeMeta] = useState<TaskTypeMetaMap>(
+    DEFAULT_TASK_TYPE_META,
+  );
   // profiles.id -> current display label, used to render task.assignee_id.
   const labelById = useMemo(() => {
     const m = new Map<string, string>();
@@ -688,6 +698,11 @@ export default function TasksPage() {
     loadStatusMeta()
       .then(setStatusMeta)
       .catch((err) => console.error("状態マスタの読み込みに失敗:", err));
+
+    // Task type (工程) master. Labels only — same fallback behaviour.
+    loadTaskTypeMeta()
+      .then(setTaskTypeMeta)
+      .catch((err) => console.error("工程マスタの読み込みに失敗:", err));
   }, []);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
@@ -1108,6 +1123,7 @@ export default function TasksPage() {
       labelById={labelById}
       priorityMeta={priorityMeta}
       statusMeta={statusMeta}
+      taskTypeMeta={taskTypeMeta}
       onSave={handleUpdate}
     />
   );
@@ -1482,7 +1498,7 @@ export default function TasksPage() {
                 <option value="">種別なし</option>
                 {TASK_TYPE_ORDER.map((t) => (
                   <option key={t} value={t}>
-                    {TASK_TYPE_META[t].label}
+                    {taskTypeMeta[t].label}
                   </option>
                 ))}
               </select>

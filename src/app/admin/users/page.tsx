@@ -252,9 +252,18 @@ export default function AdminUsersPage() {
         background: `linear-gradient(180deg,#dceffb 0,#f3faff 180px,${C.card2} 180px)`,
       }}
     >
-      <div className="mx-auto max-w-[1120px] px-5">
-        {/* App bar — breadcrumb + actions, mirroring the /tasks header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 pt-6">
+      {/* App bar — breadcrumb + actions, mirroring the /tasks header. Sticky and
+          full width: pinned inside the centred column would leave the page
+          scrolling past in the margins beside it. */}
+      <div
+        className="sticky top-0 z-30"
+        style={{
+          background: "rgba(243,250,255,.92)",
+          backdropFilter: "blur(6px)",
+          borderBottom: `1px solid ${C.line}`,
+        }}
+      >
+        <div className="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-3 px-5 pb-3 pt-4">
           <div>
             <div className="text-[0.82rem] font-semibold" style={{ color: C.muted }}>
               進捗管理 ／ 設定 ／ マスタ管理
@@ -288,7 +297,9 @@ export default function AdminUsersPage() {
             </Link>
           </div>
         </div>
+      </div>
 
+      <div className="mx-auto max-w-[1120px] px-5 pt-5">
         {/* Why this screen exists */}
         <div className="mb-4 px-5 py-4 text-[0.93rem]" style={CARD_STYLE}>
           <p>
@@ -328,7 +339,14 @@ export default function AdminUsersPage() {
 
         <div className="grid items-start gap-4 md:grid-cols-[244px_1fr]">
           {/* Master categories. Only members exists today. */}
-          <nav className="p-2.5" style={CARD_STYLE} aria-label="マスタの種類">
+          {/* Pinned below the app bar so the tab list stays reachable while a
+              long panel scrolls. Single-column below md, where there is no
+              side to pin it to. */}
+          <nav
+            className="p-2.5 md:sticky md:top-[80px]"
+            style={CARD_STYLE}
+            aria-label="マスタの種類"
+          >
             <h3
               className="mx-2 mb-2 mt-1.5 text-[0.72rem] font-extrabold uppercase tracking-[0.09em]"
               style={{ color: C.muted }}

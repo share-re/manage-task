@@ -12,7 +12,7 @@ import {
 import { C, CARD_STYLE } from "./theme";
 
 /**
- * 工程マスタ. Labels only — a task type has no color anywhere in the UI yet.
+ * 種別マスタ. Labels only — a task type has no color anywhere in the UI yet.
  * This is the tab the mock called カテゴリ; see the note at the bottom.
  */
 export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
@@ -44,7 +44,7 @@ export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
   }, [tasks]);
 
   // Tasks with no type at all. Worth surfacing: the comparison in the AI phase
-  // comes from 工程 × 難易度, and untyped tasks drop out of it entirely.
+  // comes from 種別 × 難易度, and untyped tasks drop out of it entirely.
   const untyped = useMemo(
     () => tasks.filter((t) => !t.task_type).length,
     [tasks],
@@ -80,7 +80,7 @@ export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
       setEditing(null);
       load();
       setNotice(
-        `「${label}」に変更しました。タスクの登録・編集の工程プルダウンに反映されます。`,
+        `「${label}」に変更しました。タスクの登録・編集の種別プルダウンに反映されます。`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -92,13 +92,13 @@ export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
   return (
     <section className="px-5 py-4" style={CARD_STYLE}>
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="text-[1.05rem] font-extrabold">🏷 工程マスタ</h2>
+        <h2 className="text-[1.05rem] font-extrabold">🏷 種別マスタ</h2>
         <span className="text-[0.82rem]" style={{ color: C.muted }}>
           6件（固定）
         </span>
       </div>
       <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
-        タスク登録・編集の「工程」プルダウンに出る呼び名を変えられます。
+        タスク登録・編集の「種別」プルダウンに出る呼び名を変えられます。
         <b style={{ color: C.ink }}>増減はできません</b>
         （タスクに保存される値がDB側で6つに制限されているため）。
       </p>
@@ -108,8 +108,8 @@ export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
           className="mb-3 rounded-lg px-3 py-2 text-[0.84rem]"
           style={{ background: C.warnBg, color: C.ink }}
         >
-          <b style={{ color: C.warn }}>工程が未設定のタスクが {untyped} 件</b>
-          あります。工程は将来のAI効果測定で「同じ条件どうしを比べる」ための軸になるので、
+          <b style={{ color: C.warn }}>種別が未設定のタスクが {untyped} 件</b>
+          あります。種別は将来のAI効果測定で「同じ条件どうしを比べる」ための軸になるので、
           未設定のタスクは比較の対象から外れます。
         </p>
       )}
@@ -234,13 +234,13 @@ export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
           color: C.muted,
         }}
       >
-        <b style={{ color: C.ink }}>「カテゴリ」ではなく「工程」なのはなぜ？</b>
+        <b style={{ color: C.ink }}>「カテゴリ」ではなく「種別」なのはなぜ？</b>
         提案時のモックには「カテゴリ（開発／テスト／資料作成／運用・保守）」がありましたが、
-        中身がこの工程とほぼ重なります。さらに「どの案件の作業か」は
+        中身がこの種別とほぼ重なります。さらに「どの案件の作業か」は
         <b style={{ color: C.ink }}>案件（projects）</b>
         として別に用意する予定です。
         分類の軸を3本にすると登録時に毎回3つ選ぶことになり、結局どれも埋まらなくなるため、
-        <b style={{ color: C.ink }}>既にある工程に一本化</b>しました。
+        <b style={{ color: C.ink }}>既にある種別に一本化</b>しました。
         別軸が本当に必要になったら、そのとき追加できます。
       </p>
       <p
@@ -252,9 +252,9 @@ export default function TaskTypePanel({ tasks }: { tasks: Task[] }) {
         }}
       >
         <b style={{ color: C.ink }}>色がないのはなぜ？</b>
-        工程はいま<b style={{ color: C.ink }}>プルダウンにしか出ていません</b>
+        種別はいま<b style={{ color: C.ink }}>プルダウンにしか出ていません</b>
         （タスク一覧にバッジとして表示されていない）ので、色を置く場所がありません。
-        ダッシュボードで工程別に集計を出すようになったら、そのとき色を足します。
+        ダッシュボードで種別ごとの集計を出すようになったら、そのとき色を足します。
       </p>
     </section>
   );

@@ -699,10 +699,10 @@ export default function TasksPage() {
       .then(setStatusMeta)
       .catch((err) => console.error("状態マスタの読み込みに失敗:", err));
 
-    // Task type (工程) master. Labels only — same fallback behaviour.
+    // Task type (種別) master. Labels only — same fallback behaviour.
     loadTaskTypeMeta()
       .then(setTaskTypeMeta)
-      .catch((err) => console.error("工程マスタの読み込みに失敗:", err));
+      .catch((err) => console.error("種別マスタの読み込みに失敗:", err));
   }, []);
 
   // Auto-dismiss the save confirmation dialog after a short moment.

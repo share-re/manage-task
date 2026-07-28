@@ -7,7 +7,7 @@ import {
 } from "./tasks";
 
 /**
- * Task type (工程) presentation, read from the task_types master table.
+ * Task type (種別) presentation, read from the task_types master table.
  *
  * Labels only. A task type has no color anywhere in the UI — it appears in the
  * new-task and edit dropdowns and nowhere else — so there is nothing for a

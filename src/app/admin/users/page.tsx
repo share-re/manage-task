@@ -339,7 +339,7 @@ export default function AdminUsersPage() {
                 { key: "member", emoji: "👤", label: "メンバー" },
                 { key: "priority", emoji: "🚩", label: "優先度" },
                 { key: "status", emoji: "📊", label: "状態" },
-                { key: "taskType", emoji: "🏷", label: "工程" },
+                { key: "taskType", emoji: "🏷", label: "種別" },
               ] as { key: MasterTab; emoji: string; label: string }[]
             ).map((t) => (
               <button

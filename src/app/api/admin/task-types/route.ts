@@ -6,7 +6,7 @@ import { isTaskType } from "@/lib/tasks";
 export const runtime = "nodejs";
 
 /**
- * Rename a task type (工程). Body: { code, label }
+ * Rename a task type (種別). Body: { code, label }
  *
  * No color to set — see src/lib/taskTypes.ts. Reading needs no route;
  * task_types is readable by any logged-in user and has no write policy, so the
@@ -25,7 +25,7 @@ export async function PATCH(req: Request) {
   // seventh would be rejected by the database on the next save anyway.
   if (!isTaskType(body.code))
     return Response.json(
-      { error: "工程の種類が正しくありません。" },
+      { error: "種別の種類が正しくありません。" },
       { status: 400 },
     );
 
@@ -49,7 +49,7 @@ export async function PATCH(req: Request) {
     return Response.json(
       {
         error: missing
-          ? "工程マスタのテーブルがまだありません。scripts/sql/task_types.sql を Supabase で実行してください。"
+          ? "種別マスタのテーブルがまだありません。scripts/sql/task_types.sql を Supabase で実行してください。"
           : error.message,
       },
       { status: 500 },

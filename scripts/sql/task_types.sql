@@ -1,4 +1,4 @@
--- Task type master (工程マスタ) — PR1: the table and today's values.
+-- Task type master (種別マスタ) — PR1: the table and today's values.
 -- Run this once in the Supabase SQL Editor. Safe to re-run.
 --
 -- Third of the same shape as task_priorities / task_statuses. Only the label is

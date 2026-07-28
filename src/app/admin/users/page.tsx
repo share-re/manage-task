@@ -9,6 +9,8 @@ type ManagedUser = {
   id: string;
   email: string | null;
   name: string | null;
+  // A placeholder an admin typed in. The owner has not named themselves yet.
+  provisional: boolean;
   role: "admin" | "general";
   banned: boolean;
   created_at: string;
@@ -167,9 +169,9 @@ export default function AdminUsersPage() {
     const legacy = tasks.filter((t) => !t.assignee_id && t.assignee).length;
     return {
       noName: users.filter((u) => !u.name).length,
+      provisional: users.filter((u) => u.provisional).length,
       legacy,
       unassigned: tasks.filter((t) => !t.assignee_id && !t.assignee).length,
-      disabled: users.filter((u) => u.banned).length,
     };
   }, [users, tasks]);
 
@@ -217,7 +219,9 @@ export default function AdminUsersPage() {
     const ok = await patch(userId, { name: next });
     if (ok) {
       setEditingId(null);
-      setNotice("表示名を更新しました。タスク一覧の担当者名にも反映されます。");
+      setNotice(
+        "仮の表示名を設定しました。タスク一覧の担当者名にも反映されます。本人が自分で設定すると「仮」が外れます。",
+      );
     }
   }
 
@@ -304,7 +308,8 @@ export default function AdminUsersPage() {
             ここで設定すれば、タスク一覧にも定期サマリメールにも反映されます。
           </p>
           <p className="mt-2 text-[0.86rem]" style={{ color: C.muted }}>
-            管理者のみが利用できます。表示名は本人以外（管理者）からも設定できます。
+            管理者が設定できるのは<b style={{ color: C.ink }}>「未設定の人の仮の表示名」だけ</b>です。
+            本人が自分で設定した表示名は、管理者からは変更できません。
           </p>
         </div>
 
@@ -318,12 +323,13 @@ export default function AdminUsersPage() {
           </h2>
           <ul className="grid list-none grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-2.5 p-0">
             <Finding n={health.noName} label="表示名が未設定のメンバー" tone="bad" />
+            <Finding n={health.provisional} label="仮の表示名のままのメンバー" tone="warn" />
             <Finding n={health.legacy} label="担当者が旧表記のままのタスク" tone="warn" />
-            <Finding n={health.unassigned} label="担当者なしのタスク" tone="warn" />
-            <Finding n={health.disabled} label="無効になっているメンバー" tone="calm" />
+            <Finding n={health.unassigned} label="担当者なしのタスク" tone="calm" />
           </ul>
           <p className="mt-3 text-[0.8rem]" style={{ color: C.muted }}>
             「旧表記のまま」が 0 件なら、過去データの移行（名寄せ）は不要です。
+            「仮の表示名」は、本人がオフィス画面で自分の名前を保存すると自動で解消されます。
           </p>
         </div>
 
@@ -371,7 +377,8 @@ export default function AdminUsersPage() {
             </div>
             <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
               <b style={{ color: C.ink }}>表示名が空の行が要整備です。</b>
-              「表示名を設定」から入力すると、タスク一覧の担当者欄がメールアドレスから名前に変わります。
+              「仮の表示名を設定」から入力すると、タスク一覧の担当者欄がメールアドレスから名前に変わります。
+              入れた名前は <b style={{ color: C.ink }}>仮</b> の扱いで、本人が自分で設定するまでは直せます。
             </p>
 
             {/* Invite (F8) */}
@@ -460,6 +467,8 @@ export default function AdminUsersPage() {
                       const rowBusy = busy === u.id;
                       const editing = editingId === u.id;
                       const attn = !u.name;
+                      // Owner-set names are off limits to admins (see the API).
+                      const canEditName = !u.name || u.provisional;
                       return (
                         <tr
                           key={u.id}
@@ -502,7 +511,14 @@ export default function AdminUsersPage() {
                                 </button>
                               </div>
                             ) : u.name ? (
-                              u.name
+                              <span className="inline-flex items-center gap-1.5">
+                                {u.name}
+                                {u.provisional && (
+                                  <Pill bg={C.warnBg} color={C.warn}>
+                                    仮
+                                  </Pill>
+                                )}
+                              </span>
                             ) : (
                               <Pill bg={C.warnBg} color={C.warn}>
                                 表示名なし
@@ -539,7 +555,7 @@ export default function AdminUsersPage() {
                           </td>
                           <td className="px-3 py-2.5">
                             <div className="flex flex-wrap gap-1.5">
-                              {!editing && (
+                              {!editing && canEditName && (
                                 <button
                                   disabled={rowBusy}
                                   onClick={() => startEdit(u)}
@@ -554,7 +570,7 @@ export default function AdminUsersPage() {
                                       : { border: `1px solid ${C.line}`, color: C.ink }
                                   }
                                 >
-                                  {attn ? "表示名を設定" : "編集"}
+                                  {attn ? "仮の表示名を設定" : "仮の名前を直す"}
                                 </button>
                               )}
                               {isLastAdmin ? (
@@ -601,6 +617,15 @@ export default function AdminUsersPage() {
 
             <p
               className="mt-3.5 rounded-xl px-3 py-2.5 text-[0.82rem]"
+              style={{ background: C.card2, border: `1px dashed ${C.line}`, color: C.muted }}
+            >
+              <b style={{ color: C.ink }}>名前は本人のものです。</b>
+              管理者が触れるのは、<b style={{ color: C.ink }}>表示名が未設定の人</b>と、
+              <b style={{ color: C.ink }}>まだ「仮」のままの人</b>だけです（打ち間違いを直せるようにするため）。
+              本人がオフィス画面で自分の名前を保存すると「仮」が外れ、以後は管理者からも変更できなくなります。
+            </p>
+            <p
+              className="mt-2 rounded-xl px-3 py-2.5 text-[0.82rem]"
               style={{ background: C.card2, border: `1px dashed ${C.line}`, color: C.muted }}
             >
               <b style={{ color: C.ink }}>表示名の反映先：</b>

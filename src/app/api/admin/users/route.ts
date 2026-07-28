@@ -7,6 +7,9 @@ type ManagedUser = {
   id: string;
   email: string | null;
   name: string | null;
+  // True while the name is a placeholder an admin typed in. Cleared as soon as
+  // the owner saves their own name from the office screen.
+  provisional: boolean;
   role: "admin" | "general";
   banned: boolean;
   created_at: string;
@@ -15,6 +18,14 @@ type ManagedUser = {
 // Display names are limited to the same length the user-facing editor allows
 // (see the office screen), so an admin can't set a name the owner couldn't.
 const NAME_MAX = 20;
+
+// Marker kept in user_metadata rather than a profiles column, so this needs no
+// migration. Absent means "the owner chose this name".
+const PROVISIONAL_KEY = "name_provisional";
+
+function isProvisional(meta: Record<string, unknown> | undefined): boolean {
+  return meta?.[PROVISIONAL_KEY] === true;
+}
 
 // F5: list users (admin only). Small-team scale — default page (~50) is fine.
 export async function GET(req: Request) {
@@ -36,17 +47,21 @@ export async function GET(req: Request) {
   for (const p of profiles ?? [])
     profileName.set(p.id as string, (p.name as string | null) ?? null);
 
-  const users: ManagedUser[] = data.users.map((u) => ({
-    id: u.id,
-    email: u.email ?? null,
-    name:
+  const users: ManagedUser[] = data.users.map((u) => {
+    const name =
       profileName.get(u.id) ??
       (u.user_metadata?.name as string | undefined) ??
-      null,
-    role: u.app_metadata?.role === "admin" ? "admin" : "general",
-    banned: Boolean((u as { banned_until?: string | null }).banned_until),
-    created_at: u.created_at,
-  }));
+      null;
+    return {
+      id: u.id,
+      email: u.email ?? null,
+      name,
+      provisional: Boolean(name) && isProvisional(u.user_metadata),
+      role: u.app_metadata?.role === "admin" ? "admin" : "general",
+      banned: Boolean((u as { banned_until?: string | null }).banned_until),
+      created_at: u.created_at,
+    };
+  });
   return Response.json({ users });
 }
 
@@ -94,11 +109,45 @@ export async function PATCH(req: Request) {
       );
   }
 
+  // An admin may only fill in a missing name, or correct a placeholder they
+  // typed earlier. Once the owner has named themselves, the name is theirs.
+  // Enforced here rather than in the UI: hiding the button is not a rule.
+  let nameMeta: Record<string, unknown> | undefined;
+  if (name !== undefined) {
+    const { data: target, error: tErr } =
+      await supabaseAdmin.auth.admin.getUserById(userId);
+    if (tErr || !target.user)
+      return Response.json(
+        { error: "対象のユーザーが見つかりません。" },
+        { status: 404 },
+      );
+    const { data: prof } = await supabaseAdmin
+      .from("profiles")
+      .select("name")
+      .eq("id", userId)
+      .maybeSingle();
+    const meta = target.user.user_metadata ?? {};
+    const current =
+      ((prof?.name as string | null) ??
+        (meta.name as string | undefined) ??
+        "").trim();
+    if (current && !isProvisional(meta))
+      return Response.json(
+        {
+          error:
+            "本人が設定した表示名は変更できません。仮の表示名を設定できるのは、未設定の人だけです。",
+        },
+        { status: 403 },
+      );
+    // Spread the existing metadata so unrelated keys survive the update.
+    nameMeta = { ...meta, name, [PROVISIONAL_KEY]: true };
+  }
+
   const attrs: Record<string, unknown> = {};
   if (role === "admin" || role === "general") attrs.app_metadata = { role };
   if (banned === true) attrs.ban_duration = "876000h"; // effectively permanent
   if (banned === false) attrs.ban_duration = "none"; // lift the ban
-  if (name !== undefined) attrs.user_metadata = { name };
+  if (nameMeta) attrs.user_metadata = nameMeta;
   if (Object.keys(attrs).length === 0)
     return Response.json({ error: "変更内容がありません。" }, { status: 400 });
 

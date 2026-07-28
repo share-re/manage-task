@@ -296,7 +296,11 @@ export default function OfficePage() {
     setSavingName(true);
     setNameError(undefined);
     const uid = session?.user.id;
-    const { error: e1 } = await supabase.auth.updateUser({ data: { name: next } });
+    // name_provisional marks a placeholder an admin filled in. Saving your own
+    // name clears it, so the admin screen stops offering to edit this row.
+    const { error: e1 } = await supabase.auth.updateUser({
+      data: { name: next, name_provisional: false },
+    });
     const { error: e2 } = uid
       ? await supabase.from("profiles").upsert({ id: uid, name: next })
       : { error: null };

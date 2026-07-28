@@ -15,7 +15,6 @@ import {
   updateTask,
   updateTaskStatus,
   completeTask,
-  STATUS_META,
   STATUS_ORDER,
   PRIORITY_ORDER,
   TASK_TYPE_META,
@@ -33,6 +32,11 @@ import {
   loadPriorityMeta,
   type PriorityMetaMap,
 } from "@/lib/priorities";
+import {
+  DEFAULT_STATUS_META,
+  loadStatusMeta,
+  type StatusMetaMap,
+} from "@/lib/statuses";
 import { addComment, listComments, type TaskComment } from "@/lib/comments";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
@@ -111,6 +115,7 @@ function TaskRow({
   members,
   labelById,
   priorityMeta,
+  statusMeta,
   onSave,
 }: {
   task: Task;
@@ -127,6 +132,8 @@ function TaskRow({
   labelById: Map<string, string>;
   // Priority labels/colors from the master table (see @/lib/priorities).
   priorityMeta: PriorityMetaMap;
+  // Status labels/colors from the master table (see @/lib/statuses).
+  statusMeta: StatusMetaMap;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
@@ -219,7 +226,7 @@ function TaskRow({
       className={`rounded-lg border-l-4 shadow-sm ring-1 ring-black/5 ${
         isChild ? "bg-zinc-50" : "bg-white"
       }`}
-      style={{ borderLeftColor: STATUS_META[task.status].barColor }}
+      style={{ borderLeftColor: statusMeta[task.status].barColor }}
     >
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
@@ -286,11 +293,11 @@ function TaskRow({
               onChangeStatus(task.id, e.target.value as TaskStatus)
             }
             aria-label="状態"
-            className={`cursor-pointer rounded-full border-0 px-2.5 py-1 text-xs font-medium outline-none ${STATUS_META[task.status].badgeClass}`}
+            className={`cursor-pointer rounded-full border-0 px-2.5 py-1 text-xs font-medium outline-none ${statusMeta[task.status].badgeClass}`}
           >
             {STATUS_ORDER.map((s) => (
               <option key={s} value={s}>
-                {STATUS_META[s].label}
+                {statusMeta[s].label}
               </option>
             ))}
           </select>
@@ -356,7 +363,7 @@ function TaskRow({
                 >
                   {STATUS_ORDER.map((s) => (
                     <option key={s} value={s}>
-                      {STATUS_META[s].label}
+                      {statusMeta[s].label}
                     </option>
                   ))}
                 </select>
@@ -586,6 +593,8 @@ export default function TasksPage() {
   // defaults so the first paint matches what loads a moment later.
   const [priorityMeta, setPriorityMeta] =
     useState<PriorityMetaMap>(DEFAULT_PRIORITY_META);
+  const [statusMeta, setStatusMeta] =
+    useState<StatusMetaMap>(DEFAULT_STATUS_META);
   // profiles.id -> current display label, used to render task.assignee_id.
   const labelById = useMemo(() => {
     const m = new Map<string, string>();
@@ -673,6 +682,12 @@ export default function TasksPage() {
     loadPriorityMeta()
       .then(setPriorityMeta)
       .catch((err) => console.error("優先度マスタの読み込みに失敗:", err));
+
+    // Status master. Same deal: a missing task_statuses table leaves the badges
+    // and the row bar colors exactly as they were.
+    loadStatusMeta()
+      .then(setStatusMeta)
+      .catch((err) => console.error("状態マスタの読み込みに失敗:", err));
   }, []);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
@@ -1092,6 +1107,7 @@ export default function TasksPage() {
       members={members}
       labelById={labelById}
       priorityMeta={priorityMeta}
+      statusMeta={statusMeta}
       onSave={handleUpdate}
     />
   );
@@ -1282,7 +1298,7 @@ export default function TasksPage() {
             <option value="">状態：すべて</option>
             {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
               <option key={s} value={s}>
-                {STATUS_META[s].label}
+                {statusMeta[s].label}
               </option>
             ))}
           </select>
@@ -1433,7 +1449,7 @@ export default function TasksPage() {
                     is completed from the list/edit, not registered as done. */}
                 {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
                   <option key={s} value={s}>
-                    {STATUS_META[s].label}
+                    {statusMeta[s].label}
                   </option>
                 ))}
               </select>

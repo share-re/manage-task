@@ -3,6 +3,7 @@ import {
   STATUS_LABELS,
   taskProgress,
   type Task,
+  type TaskStatus,
 } from "./tasks";
 
 export type Summary = { subject: string; text: string; html: string };
@@ -40,9 +41,14 @@ export function buildProgressSummary(
     lastSentAt: string | null;
     // profiles.id -> current display name, to resolve task.assignee_id.
     labelById: Map<string, string>;
+    // Status labels from the master table. Omitted (or partial) falls back to
+    // the defaults, so a renamed status reads the same in the mail as on screen.
+    statusLabels?: Partial<Record<TaskStatus, string>>;
   },
 ): Summary {
   const { dateLabel, lastSentAt, labelById } = opts;
+  const statusLabel = (s: TaskStatus) =>
+    opts.statusLabels?.[s] ?? STATUS_LABELS[s];
   const assigneeLabel = (t: Task) =>
     resolveAssigneeLabel(t, labelById) || "担当者なし";
   const todayMs = jstTodayMs();
@@ -59,7 +65,7 @@ export function buildProgressSummary(
         diff < 0 ? `${-diff}日超過` : diff === 0 ? "本日締切" : `あと${diff}日`;
       return {
         label,
-        line: `[${label}] ${t.title}   担当: ${assigneeLabel(t)}   期限 ${mmdd(t.due_date as string)}（${STATUS_LABELS[t.status]}）`,
+        line: `[${label}] ${t.title}   担当: ${assigneeLabel(t)}   期限 ${mmdd(t.due_date as string)}（${statusLabel(t.status)}）`,
       };
     });
 

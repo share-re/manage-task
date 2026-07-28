@@ -74,15 +74,16 @@ export type Task = {
   completed_at: string | null;
 };
 
-// Presentation metadata for each status, kept together so the label, the
-// display order, and the badge color can never drift apart across files.
-export const STATUS_META: Record<
-  TaskStatus,
-  { label: string; badgeClass: string; barColor: string }
-> = {
-  todo: { label: "未着手", badgeClass: "bg-zinc-100 text-zinc-600", barColor: "#B4B2A9" },
-  in_progress: { label: "進行中", badgeClass: "bg-blue-100 text-blue-700", barColor: "#378ADD" },
-  done: { label: "完了", badgeClass: "bg-green-200 text-green-800", barColor: "#3B6D11" },
+// Default label for each status.
+//
+// The badge class and the row's bar color used to live here too. They now
+// belong to the status master (@/lib/statuses), which reads the label and
+// color from task_statuses and falls back to the labels below — keeping one
+// place per piece of information.
+export const STATUS_META: Record<TaskStatus, { label: string }> = {
+  todo: { label: "未着手" },
+  in_progress: { label: "進行中" },
+  done: { label: "完了" },
 };
 
 export const STATUS_ORDER: TaskStatus[] = [...TASK_STATUSES];

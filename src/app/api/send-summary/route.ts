@@ -138,12 +138,23 @@ async function runSend(opts: {
     labelById.set(p.id as string, label);
   }
 
+  // Status labels from the master, so a renamed status reads the same in the
+  // mail as it does on screen. Absent table -> defaults inside buildProgressSummary.
+  const { data: statusRows } = await supabaseAdmin
+    .from("task_statuses")
+    .select("code, label");
+  const statusLabels: Record<string, string> = {};
+  for (const s of statusRows ?? [])
+    if (typeof s.label === "string" && s.label.trim())
+      statusLabels[s.code as string] = s.label.trim();
+
   const jl = nowJst();
   const dateLabel = `${jl.getUTCFullYear()}/${jl.getUTCMonth() + 1}/${jl.getUTCDate()}`;
   const summary = buildProgressSummary((tasks ?? []) as Task[], {
     dateLabel,
     lastSentAt: settings?.last_sent_at ?? null,
     labelById,
+    statusLabels,
   });
 
   // Record every attempt in the send history (best-effort; never blocks send).

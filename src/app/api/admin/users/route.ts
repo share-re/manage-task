@@ -81,6 +81,15 @@ export async function PATCH(req: Request) {
   if (!userId)
     return Response.json({ error: "userId が必要です。" }, { status: 400 });
 
+  // Banning yourself locks the door from the inside, same as deleting yourself.
+  // Demoting yourself is left allowed — stepping down is a real thing to do,
+  // and the last-admin guard below still keeps someone in charge.
+  if (banned === true && userId === g.userId)
+    return Response.json(
+      { error: "自分のアカウントは無効化できません。" },
+      { status: 400 },
+    );
+
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   if (name !== undefined) {
     if (!name)

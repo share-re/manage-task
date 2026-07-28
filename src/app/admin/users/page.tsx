@@ -629,28 +629,38 @@ export default function AdminUsersPage() {
                                   >
                                     {u.role === "admin" ? "一般にする" : "管理者にする"}
                                   </button>
-                                  <button
-                                    disabled={rowBusy}
-                                    onClick={() => patch(u.id, { banned: !u.banned })}
-                                    className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
-                                    style={
-                                      u.banned
-                                        ? { border: `1px solid ${C.accent}`, color: C.accentInk }
-                                        : { border: "1px solid #e0b4b4", color: "#a12a2a" }
-                                    }
-                                  >
-                                    {u.banned ? "有効に戻す" : "無効化"}
-                                  </button>
-                                  {/* Self-deletion would lock the caller out mid-session. */}
+                                  {/* Banning or deleting yourself would lock the
+                                      caller out mid-session, so neither is
+                                      offered on your own row (nor allowed by
+                                      the API). Demoting yourself still is. */}
                                   {!isSelf && (
-                                    <button
-                                      disabled={rowBusy}
-                                      onClick={() => setConfirmDelete(u)}
-                                      className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
-                                      style={{ border: `1px solid ${C.danger}`, color: C.danger }}
-                                    >
-                                      削除
-                                    </button>
+                                    <>
+                                      <button
+                                        disabled={rowBusy}
+                                        onClick={() => patch(u.id, { banned: !u.banned })}
+                                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                        style={
+                                          u.banned
+                                            ? { border: `1px solid ${C.accent}`, color: C.accentInk }
+                                            : { border: "1px solid #e0b4b4", color: "#a12a2a" }
+                                        }
+                                      >
+                                        {u.banned ? "有効に戻す" : "無効化"}
+                                      </button>
+                                      <button
+                                        disabled={rowBusy}
+                                        onClick={() => setConfirmDelete(u)}
+                                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                        style={{ border: `1px solid ${C.danger}`, color: C.danger }}
+                                      >
+                                        削除
+                                      </button>
+                                    </>
+                                  )}
+                                  {isSelf && (
+                                    <span className="text-xs" style={{ color: C.muted }}>
+                                      🔒 自分のアカウントは無効化・削除できません
+                                    </span>
                                   )}
                                 </>
                               )}
@@ -688,6 +698,10 @@ export default function AdminUsersPage() {
               <b style={{ color: C.ink }}>無効化について：</b>
               無効にしたメンバーはログインできなくなりますが、
               <b style={{ color: C.ink }}>過去タスクの担当者名はそのまま残ります</b>（削除ではないため）。
+              「有効に戻す」でいつでも復帰でき、パスワードもそのまま使えます。
+              ただし<b style={{ color: C.ink }}>メールアドレスは空きません</b>
+              ── アカウント自体は残っているので、同じアドレスで新しく招待することはできません。
+              アドレスを再利用したい場合だけ、削除を使ってください。
             </p>
           </section>
         </div>

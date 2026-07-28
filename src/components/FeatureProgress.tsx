@@ -57,9 +57,12 @@ function fmtHours(h: number): string {
 export default function FeatureProgress({
   tasks,
   labelById,
+  openNoteCountByTask,
 }: {
   tasks: Task[];
   labelById: Map<string, string>;
+  /** タスクごとの未対応メモ件数。親が1回だけ集計した Map を受け取る。 */
+  openNoteCountByTask?: Map<string, number>;
 }) {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [riskOnlyIds, setRiskOnlyIds] = useState<Set<string>>(new Set());
@@ -96,6 +99,19 @@ export default function FeatureProgress({
         const nDanger = risks.filter((r) => r.risk!.kind === "danger").length;
         const nWarn = risks.filter((r) => r.risk!.kind === "warn").length;
         const nGray = risks.filter((r) => r.risk!.kind === "gray").length;
+        // 未対応の懸念メモ件数。完了済みの子は数えない（片付いた作業の懸念は
+        // 追いかけても仕方ないため）。親自身に付いたメモも機能の懸念として足す。
+        const nConcern = openNoteCountByTask
+          ? children.reduce(
+              (sum, c) =>
+                c.status === "done"
+                  ? sum
+                  : sum + (openNoteCountByTask.get(c.id) ?? 0),
+              parent.status === "done"
+                ? 0
+                : (openNoteCountByTask.get(parent.id) ?? 0),
+            )
+          : 0;
         return {
           parent,
           children,
@@ -106,9 +122,10 @@ export default function FeatureProgress({
           nDanger,
           nWarn,
           nGray,
+          nConcern,
         };
       });
-  }, [tasks, labelById]);
+  }, [tasks, labelById, openNoteCountByTask]);
 
   if (features.length === 0) return null;
 
@@ -126,6 +143,11 @@ export default function FeatureProgress({
       next.delete(id);
       return next;
     });
+  }
+
+  // 懸念バッジ用：期限リスクの絞り込みは掛けず、機能行を開くだけ。
+  function openFeature(id: string) {
+    setOpenIds((prev) => new Set(prev).add(id));
   }
 
   function openRiskOnly(id: string) {
@@ -199,6 +221,26 @@ export default function FeatureProgress({
                 {remainLabel}
               </span>
               <span className="flex shrink-0 items-center gap-1.5">
+                {f.nConcern > 0 && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="未対応の懸念メモ（クリックで内訳を開く）"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openFeature(f.parent.id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        openFeature(f.parent.id);
+                      }
+                    }}
+                    className="cursor-pointer rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+                  >
+                    ! 懸念 {f.nConcern}
+                  </span>
+                )}
                 {f.nDanger > 0 && (
                   <span
                     role="button"
@@ -256,7 +298,10 @@ export default function FeatureProgress({
                     担当なし {f.nGray}
                   </span>
                 )}
-                {f.nDanger === 0 && f.nWarn === 0 && f.nGray === 0 && (
+                {f.nDanger === 0 &&
+                  f.nWarn === 0 &&
+                  f.nGray === 0 &&
+                  f.nConcern === 0 && (
                   <span className="text-[11px] text-green-700">✓ 順調</span>
                 )}
               </span>

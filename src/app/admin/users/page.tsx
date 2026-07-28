@@ -32,6 +32,33 @@ type MasterTab =
   | "template"
   | "mail";
 
+// Ordered by how often they are actually opened, not by when they were built.
+// メンバー and 定型タスク get used as the team changes and as work is
+// registered; the second group only decides what things are called and what
+// colour they are, which is a decision made about once. Keeping them in one
+// flat list buried the two that matter.
+const TAB_GROUPS: {
+  heading: string;
+  tabs: { key: MasterTab; emoji: string; label: string }[];
+}[] = [
+  {
+    heading: "マスタ",
+    tabs: [
+      { key: "member", emoji: "👤", label: "メンバー" },
+      { key: "template", emoji: "📋", label: "定型タスク" },
+      { key: "mail", emoji: "✉️", label: "共有先" },
+    ],
+  },
+  {
+    heading: "呼び名・色",
+    tabs: [
+      { key: "priority", emoji: "🚩", label: "優先度" },
+      { key: "status", emoji: "📊", label: "状態" },
+      { key: "taskType", emoji: "🏷", label: "種別" },
+    ],
+  },
+];
+
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -274,38 +301,37 @@ export default function AdminUsersPage() {
           style={CARD_STYLE}
           aria-label="マスタの種類"
         >
-            <h3
-              className="mx-2 mb-2 mt-1.5 text-[0.72rem] font-extrabold uppercase tracking-[0.09em]"
-              style={{ color: C.muted }}
-            >
-              マスタ
-            </h3>
-            {(
-              [
-                { key: "member", emoji: "👤", label: "メンバー" },
-                { key: "priority", emoji: "🚩", label: "優先度" },
-                { key: "status", emoji: "📊", label: "状態" },
-                { key: "taskType", emoji: "🏷", label: "種別" },
-                { key: "template", emoji: "📋", label: "定型タスク" },
-                { key: "mail", emoji: "✉️", label: "共有先" },
-              ] as { key: MasterTab; emoji: string; label: string }[]
-            ).map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setTab(t.key)}
-                aria-current={tab === t.key ? "page" : undefined}
-                className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[0.86rem] font-bold"
-                style={
-                  tab === t.key
-                    ? { background: C.accent, color: "#fff" }
-                    : { color: C.ink }
-                }
+          {TAB_GROUPS.map((group, gi) => (
+            <div key={group.heading} className={gi > 0 ? "mt-3" : undefined}>
+              <h3
+                className="mx-2 mb-2 mt-1.5 text-[0.72rem] font-extrabold uppercase tracking-[0.09em]"
+                style={{
+                  color: C.muted,
+                  borderTop: gi > 0 ? `1px solid ${C.line}` : undefined,
+                  paddingTop: gi > 0 ? 10 : undefined,
+                }}
               >
-                <span className="w-[1.15em] text-center">{t.emoji}</span>
-                {t.label}
-              </button>
-            ))}
+                {group.heading}
+              </h3>
+              {group.tabs.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  aria-current={tab === t.key ? "page" : undefined}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[0.86rem] font-bold"
+                  style={
+                    tab === t.key
+                      ? { background: C.accent, color: "#fff" }
+                      : { color: C.ink }
+                  }
+                >
+                  <span className="w-[1.15em] text-center">{t.emoji}</span>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ))}
         </nav>
 
         {/* The only thing that scrolls from md up. */}

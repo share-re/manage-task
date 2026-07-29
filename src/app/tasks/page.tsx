@@ -362,10 +362,13 @@ function TaskRow({
             )}
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+            {/* マスタの表示名をそのまま出す。「優先」を前に足していたが、
+                表示名を「最優先」に変えると「優先 最優先」になってしまう。
+                名前を決めるのはマスタ側の仕事なので、アプリは足さない。 */}
             <span
               className={`rounded px-1.5 py-0.5 font-medium ${priorityMeta[task.priority].badgeClass}`}
             >
-              優先 {priorityMeta[task.priority].label}
+              {priorityMeta[task.priority].label}
             </span>
             {/* Difficulty tag: outlined (vs. the filled priority badge) so the
                 two "中" labels can never be confused. Shown only when an

@@ -274,10 +274,11 @@ export default function TemplateModal({
                 </div>
                 {childList(t, true)}
                 <div className="mt-3 flex items-center justify-between gap-2">
+                  {/* タスク一覧のバッジと同じ。マスタの表示名をそのまま出す。 */}
                   <span
                     className={`rounded px-1.5 py-0.5 text-[0.7rem] font-medium ${priorityMeta[t.priority].badgeClass}`}
                   >
-                    優先 {priorityMeta[t.priority].label}
+                    {priorityMeta[t.priority].label}
                   </span>
                   <button
                     type="button"

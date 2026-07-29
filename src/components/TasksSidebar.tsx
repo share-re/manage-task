@@ -12,10 +12,11 @@ import NotificationBell from "./NotificationBell";
 
 const NAV: { href: string; label: string; icon: React.FC }[] = [
   { href: "/tasks", label: "進捗管理", icon: IconList },
+  // 「品質」タブはここに入る予定（品質機能の実装PRで追加する）。
   { href: "/tasks/time-entry", label: "工数入力", icon: IconClock },
+  { href: "/tasks/dashboard", label: "ダッシュボード", icon: IconChart },
   { href: "/tasks/gantt", label: "ガントチャート", icon: IconGantt },
   { href: "/tasks/milestones", label: "マイルストーン", icon: IconFlag },
-  { href: "/tasks/dashboard", label: "ダッシュボード", icon: IconChart },
 ];
 
 export default function TasksSidebar() {

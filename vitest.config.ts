@@ -13,7 +13,12 @@ export default defineConfig({
     },
     coverage: {
       provider: "v8",
-      include: ["src/lib/tasks.ts", "src/lib/roles.ts"],
+      include: [
+        "src/lib/tasks.ts",
+        "src/lib/roles.ts",
+        "src/lib/taskNotes.ts",
+        "src/lib/notifications.ts",
+      ],
     },
   },
 });

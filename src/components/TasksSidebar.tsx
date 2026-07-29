@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "./AuthProvider";
 import { isAdmin } from "@/lib/roles";
 import LogoutButton from "./LogoutButton";
+import NotificationBell from "./NotificationBell";
 
 // Common left navigation for all /tasks pages (要確認-10 / フェーズ2 Step 10).
 // Icons are inline SVG because the app doesn't load the Tabler icon font.
@@ -30,11 +31,14 @@ export default function TasksSidebar() {
 
   return (
     <aside className="sticky top-0 flex h-screen w-[184px] shrink-0 flex-col self-start border-r border-black/10 bg-white px-2.5 py-3.5">
-      <div className="flex items-center gap-2 px-1.5 pb-3">
-        <span style={{ color: "#3B6D11" }}>
-          <IconSprout />
-        </span>
-        <span className="text-sm font-medium text-zinc-800">進捗管理</span>
+      <div className="flex items-center justify-between px-1.5 pb-3">
+        <div className="flex items-center gap-2">
+          <span style={{ color: "#3B6D11" }}>
+            <IconSprout />
+          </span>
+          <span className="text-sm font-medium text-zinc-800">進捗管理</span>
+        </div>
+        <NotificationBell />
       </div>
 
       {/* 案件切り替え（枠のみ・切替とRLSは後フェーズ） */}

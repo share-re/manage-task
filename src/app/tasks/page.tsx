@@ -31,7 +31,16 @@ import {
   type TaskType,
 } from "@/lib/tasks";
 import { getDefaultProjectId } from "@/lib/projects";
-import { addComment, listComments, type TaskComment } from "@/lib/comments";
+import {
+  addTaskNote,
+  listTaskNotes,
+  openNoteCountByTask,
+  setNoteResolved,
+  softDeleteTaskNote,
+  type TaskNote,
+} from "@/lib/taskNotes";
+import { isAdmin } from "@/lib/roles";
+import NotePanel from "@/components/NotePanel";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
 import ForestBackground from "@/components/ForestBackground";
@@ -100,40 +109,52 @@ function filterBySearch(pool: Task[], query: string): Task[] {
 type SortKey = "default" | "due" | "assignee" | "status" | "priority";
 
 // A single task row. Shows the task, an inline status select, and a toggleable
-// comment thread.
+// 懸念メモ panel (replaces the old comment thread).
 function TaskRow({
   task,
-  comments,
+  notes,
+  openCount,
+  notesFailed,
   expanded,
   deleteMode,
   isChild,
   childCount,
   onChangeStatus,
-  onToggleComments,
-  onAddComment,
+  onToggleNotes,
+  onAddNote,
+  onSetNoteResolved,
+  onDeleteNote,
   onDelete,
   members,
   labelById,
+  currentUserId,
+  canModerate,
   onSave,
   childActualHours = 0,
 }: {
   task: Task;
-  comments: TaskComment[];
+  notes: TaskNote[];
+  /** 未対応メモ件数。親が openNoteCountByTask で1回だけ集計した結果を受け取る。 */
+  openCount: number;
+  /** メモを読み込めなかったとき: 「懸念なし」と区別して「!?」を出す。 */
+  notesFailed: boolean;
   expanded: boolean;
   deleteMode: boolean;
   isChild: boolean;
   childCount: number;
   onChangeStatus: (id: string, status: TaskStatus) => void;
-  onToggleComments: (id: string) => void;
-  onAddComment: (taskId: string, body: string) => Promise<void>;
+  onToggleNotes: (id: string) => void;
+  onAddNote: (taskId: string, body: string) => Promise<void>;
+  onSetNoteResolved: (noteId: string, resolved: boolean) => Promise<void>;
+  onDeleteNote: (noteId: string) => Promise<void>;
   onDelete: (task: Task) => void;
   members: Member[];
   labelById: Map<string, string>;
+  currentUserId: string | null;
+  canModerate: boolean;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
   childActualHours?: number;
 }) {
-  const [draft, setDraft] = useState("");
-  const [posting, setPosting] = useState(false);
 
   // Inline edit form state. Opened by the pencil button; seeded from the task.
   const [editing, setEditing] = useState(false);
@@ -215,18 +236,6 @@ function TaskRow({
     }
   }
 
-  async function submitComment() {
-    const body = draft.trim();
-    if (!body) return;
-    setPosting(true);
-    try {
-      await onAddComment(task.id, body);
-      setDraft("");
-    } finally {
-      setPosting(false);
-    }
-  }
-
   return (
     <div
       className={`rounded-lg border-l-4 shadow-sm ring-1 ring-black/5 ${
@@ -304,13 +313,34 @@ function TaskRow({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {/* 懸念メモ: 未対応>0→「! n」／メモありで全対応済→「✓ 対応済」／
+              メモなし→「＋メモ」。読み込み失敗時は状態が不明なので、緑や「＋メモ」で
+              「懸念なし」に見せず、控えめな「－」にする（説明と再読込は上のエラー帯）。 */}
           <button
             type="button"
-            onClick={() => onToggleComments(task.id)}
+            onClick={() => onToggleNotes(task.id)}
             aria-expanded={expanded}
-            className="rounded-full px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100"
+            aria-label={notesFailed ? "懸念メモ（読み込めませんでした）" : "懸念メモ"}
+            title={
+              notesFailed ? "懸念メモを読み込めませんでした" : undefined
+            }
+            className={`rounded-full px-2 py-1 text-xs font-medium ${
+              notesFailed
+                ? "border border-zinc-200 text-zinc-300"
+                : openCount > 0
+                  ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                  : notes.length > 0
+                    ? "bg-[#EAF3DE] text-[#27500A] hover:bg-[#dcecc9]"
+                    : "border border-dashed border-zinc-300 text-zinc-400 hover:bg-zinc-50"
+            }`}
           >
-            💬 {comments.length}
+            {notesFailed
+              ? "－"
+              : openCount > 0
+                ? `! ${openCount}`
+                : notes.length > 0
+                  ? "✓ 対応済"
+                  : "＋メモ"}
           </button>
           <select
             value={task.status}
@@ -401,6 +431,12 @@ function TaskRow({
                     </option>
                   ))}
                 </select>
+                {/* 未対応の懸念を残したまま完了にしようとしたときの一言。 */}
+                {eStatus === "done" && openCount > 0 && (
+                  <span className="text-[11px] text-amber-700">
+                    未対応の懸念が{openCount}件あります
+                  </span>
+                )}
               </label>
               <label className="flex flex-1 flex-col gap-1">
                 <span className="text-xs font-medium text-zinc-600">優先度</span>
@@ -499,37 +535,15 @@ function TaskRow({
 
       {expanded && (
         <div className="border-t border-zinc-100 px-4 py-3">
-          {comments.length === 0 ? (
-            <p className="text-xs text-zinc-400">まだコメントはありません。</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {comments.map((c) => (
-                <li key={c.id} className="text-sm">
-                  <span className="text-xs text-zinc-500">
-                    {c.author || "名無し"}・{formatDateTime(c.created_at)}
-                  </span>
-                  <p className="whitespace-pre-wrap text-zinc-800">{c.body}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="mt-3 flex items-end gap-2">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              rows={2}
-              placeholder="コメントを追加…"
-              className="flex-1 resize-y rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-            />
-            <button
-              type="button"
-              onClick={submitComment}
-              disabled={posting || !draft.trim()}
-              className="rounded-lg bg-[#3B6D11] px-3 py-2 text-sm font-medium text-white transition hover:bg-[#2f5a0e] disabled:opacity-50"
-            >
-              {posting ? "送信中…" : "送信"}
-            </button>
-          </div>
+          <NotePanel
+            notes={notes}
+            labelById={labelById}
+            currentUserId={currentUserId}
+            canModerate={canModerate}
+            onAdd={(body) => onAddNote(task.id, body)}
+            onSetResolved={onSetNoteResolved}
+            onDelete={onDeleteNote}
+          />
         </div>
       )}
     </div>
@@ -605,12 +619,7 @@ function ArchivedRow({
 }
 
 export default function TasksPage() {
-  const { session, profileName } = useAuth();
-  const authorName =
-    profileName?.trim() ||
-    ((session?.user.user_metadata?.name as string | undefined) || "").trim() ||
-    session?.user.email ||
-    null;
+  const { session } = useAuth();
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -619,10 +628,17 @@ export default function TasksPage() {
   // in PR3), so a new task's project_id is never left null (要確認-10).
   const [defaultProjectId, setDefaultProjectId] = useState<string | null>(null);
 
-  // Comments, grouped by task id. Loaded once on mount.
-  const [commentsByTask, setCommentsByTask] = useState<
-    Record<string, TaskComment[]>
-  >({});
+  // 懸念メモ, grouped by task id. Loaded after the tasks (needs their ids).
+  const [notesByTask, setNotesByTask] = useState<Record<string, TaskNote[]>>(
+    {},
+  );
+  // 取得に失敗したかどうか。失敗を「懸念ゼロ」と同じ見た目にしないために持つ。
+  const [notesFailed, setNotesFailed] = useState(false);
+  // 未対応メモ件数（「！」判定）。行ごとに全メモを走査しないよう1回だけ集計する。
+  const openCountByTask = useMemo(
+    () => openNoteCountByTask(Object.values(notesByTask).flat()),
+    [notesByTask],
+  );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Registered users for the assignee picker (from the profiles table).
   const [members, setMembers] = useState<Member[]>([]);
@@ -694,15 +710,6 @@ export default function TasksPage() {
       })
       .finally(() => setLoaded(true));
 
-    // Comments are optional; a missing table shouldn't break the page.
-    listComments()
-      .then((all) => {
-        const map: Record<string, TaskComment[]> = {};
-        for (const c of all) (map[c.task_id] ??= []).push(c);
-        setCommentsByTask(map);
-      })
-      .catch((err) => console.error("コメントの読み込みに失敗:", err));
-
     // Registered users for the assignee picker. A missing profiles table
     // (not yet created) shouldn't break the page — we fall back to past names.
     listMembers()
@@ -714,6 +721,33 @@ export default function TasksPage() {
       .then(setDefaultProjectId)
       .catch((err) => console.error("案件の読み込みに失敗:", err));
   }, []);
+
+  // 懸念メモは task の id が要るので、タスク読み込み後にまとめて1回取得する。
+  // 失敗は握りつぶさず notesFailed を立て、一覧の上にエラー帯＋再読込を出す
+  // （行ごとに警告を出すと画面が騒がしいため。利用者レビュー反映）。
+  const taskIdsKey = tasks.map((t) => t.id).join(",");
+  const [notesReloadKey, setNotesReloadKey] = useState(0);
+  useEffect(() => {
+    const ids = taskIdsKey ? taskIdsKey.split(",") : [];
+    if (ids.length === 0) return;
+    let alive = true;
+    listTaskNotes(ids)
+      .then((all) => {
+        if (!alive) return;
+        const map: Record<string, TaskNote[]> = {};
+        for (const n of all) (map[n.task_id] ??= []).push(n);
+        setNotesByTask(map);
+        setNotesFailed(false);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        console.error("懸念メモの読み込みに失敗:", err);
+        setNotesFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [taskIdsKey, notesReloadKey]);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
   useEffect(() => {
@@ -982,7 +1016,7 @@ export default function TasksPage() {
     }
   }
 
-  function toggleComments(id: string) {
+  function toggleNotes(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -1000,19 +1034,36 @@ export default function TasksPage() {
     });
   }
 
-  async function handleAddComment(taskId: string, body: string) {
-    try {
-      const created = await addComment({ taskId, body, author: authorName });
-      setCommentsByTask((prev) => ({
-        ...prev,
-        [taskId]: [...(prev[taskId] ?? []), created],
-      }));
-    } catch (err) {
-      console.error(err);
-      setError(
-        "コメントの追加に失敗しました（コメント用テーブル task_comments が未作成の可能性があります）。",
-      );
-    }
+  // --- 懸念メモ（追記・対応状況・削除）。失敗は NotePanel 側で表示するため throw する。 ---
+
+  async function handleAddNote(taskId: string, body: string) {
+    const created = await addTaskNote(taskId, body, session?.user?.id ?? null);
+    setNotesByTask((prev) => ({
+      ...prev,
+      [taskId]: [...(prev[taskId] ?? []), created],
+    }));
+  }
+
+  /** 対応済み↔未対応。resolved_by/at はDBトリガーが刻むので、表示用に再取得する。 */
+  async function handleSetNoteResolved(noteId: string, resolved: boolean) {
+    await setNoteResolved(noteId, resolved);
+    const ids = tasks.map((t) => t.id);
+    const all = await listTaskNotes(ids);
+    const map: Record<string, TaskNote[]> = {};
+    for (const n of all) (map[n.task_id] ??= []).push(n);
+    setNotesByTask(map);
+  }
+
+  /** ソフト削除（権限チェックはDB関数側）。成功したら一覧から取り除く。 */
+  async function handleDeleteNote(noteId: string) {
+    await softDeleteTaskNote(noteId);
+    setNotesByTask((prev) => {
+      const next: Record<string, TaskNote[]> = {};
+      for (const [taskId, list] of Object.entries(prev)) {
+        next[taskId] = list.filter((n) => n.id !== noteId);
+      }
+      return next;
+    });
   }
 
   // Open the centered confirm dialog; the actual deletion runs in confirmDelete.
@@ -1144,7 +1195,9 @@ export default function TasksPage() {
   ) => (
     <TaskRow
       task={task}
-      comments={commentsByTask[task.id] ?? []}
+      notes={notesByTask[task.id] ?? []}
+      openCount={openCountByTask.get(task.id) ?? 0}
+      notesFailed={notesFailed}
       expanded={expanded.has(task.id)}
       deleteMode={deleteMode}
       isChild={opts.isChild ?? false}
@@ -1153,11 +1206,15 @@ export default function TasksPage() {
         (opts.childCount ?? 0) > 0 ? childActualSum(task.id) : 0
       }
       onChangeStatus={handleStatusChange}
-      onToggleComments={toggleComments}
-      onAddComment={handleAddComment}
+      onToggleNotes={toggleNotes}
+      onAddNote={handleAddNote}
+      onSetNoteResolved={handleSetNoteResolved}
+      onDeleteNote={handleDeleteNote}
       onDelete={handleDelete}
       members={members}
       labelById={labelById}
+      currentUserId={session?.user?.id ?? null}
+      canModerate={isAdmin(session)}
       onSave={handleUpdate}
     />
   );
@@ -1254,7 +1311,11 @@ export default function TasksPage() {
           label={progressLabel}
         />
       ) : (
-        <FeatureProgress tasks={tasks} labelById={labelById} />
+        <FeatureProgress
+          tasks={tasks}
+          labelById={labelById}
+          openNoteCountByTask={openCountByTask}
+        />
       )}
 
       {/* Toolbar: add / delete-mode / filters (open tab only). */}
@@ -1488,6 +1549,22 @@ export default function TasksPage() {
         </>
       )}
 
+      {/* 懸念メモを読み込めなかったときの帯（行ごとに警告を出すと騒がしいので1本にまとめる）。 */}
+      {notesFailed && (
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+          <p className="text-sm text-amber-800">
+            懸念メモを読み込めませんでした。各タスクに懸念があるかどうかは分かりません。
+          </p>
+          <button
+            type="button"
+            onClick={() => setNotesReloadKey((k) => k + 1)}
+            className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100"
+          >
+            再読込
+          </button>
+        </div>
+      )}
+
       {/* Task list card: tabs (card header) + search + filters + rows all on
           one rounded white card, floating over the forest background. */}
       <section className="rounded-2xl bg-white shadow-md ring-1 ring-black/5">
@@ -1718,6 +1795,13 @@ export default function TasksPage() {
             <p className="text-sm text-zinc-600">
               「{completionTarget.title}」を完了にします。かかった時間（実績）を入力してください。
             </p>
+            {/* 未対応の懸念を残したまま完了（＝アーカイブ）してしまうのを防ぐ一言。 */}
+            {(openCountByTask.get(completionTarget.id) ?? 0) > 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                未対応の懸念が{openCountByTask.get(completionTarget.id)}
+                件あります。完了にするとアーカイブへ移り、この一覧から見えなくなります。よろしいですか？
+              </p>
+            )}
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-zinc-600">
                 実績時間（時間）

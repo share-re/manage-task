@@ -13,6 +13,7 @@ import NotificationBell from "./NotificationBell";
 const NAV: { href: string; label: string; icon: React.FC }[] = [
   { href: "/tasks", label: "進捗管理", icon: IconList },
   { href: "/tasks/quality", label: "品質", icon: IconBug },
+  { href: "/tasks/notes", label: "懸念", icon: IconAlert },
   { href: "/tasks/time-entry", label: "工数入力", icon: IconClock },
   { href: "/tasks/dashboard", label: "ダッシュボード", icon: IconChart },
   { href: "/tasks/gantt", label: "ガントチャート", icon: IconGantt },
@@ -174,6 +175,16 @@ function IconBug() {
       <path d="M9 6a3 3 0 0 1 6 0" />
       <rect x="7" y="8" width="10" height="11" rx="5" />
       <path d="M3 12h4M17 12h4M4.5 7.5 7 9M19.5 7.5 17 9M4.5 17.5 7 16M19.5 17.5 17 16" />
+    </svg>
+  );
+}
+
+// 懸念タブ（未対応の懸念メモの横断一覧）。タスク行の「!」と同じ三角の警告。
+function IconAlert() {
+  return (
+    <svg {...svgProps()}>
+      <path d="M10.3 4.3 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z" />
+      <path d="M12 9v4M12 17h.01" />
     </svg>
   );
 }

@@ -1,17 +1,63 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
+import { listTasks, type Task } from "@/lib/tasks";
+import { C, CARD_STYLE, Pill } from "./theme";
+import PriorityPanel from "./PriorityPanel";
+import StatusPanel from "./StatusPanel";
+import TaskTypePanel from "./TaskTypePanel";
+import TemplatePanel from "./TemplatePanel";
+import MailPanel from "./MailPanel";
 
 type ManagedUser = {
   id: string;
   email: string | null;
   name: string | null;
+  // A placeholder an admin typed in. The owner has not named themselves yet.
+  provisional: boolean;
   role: "admin" | "general";
   banned: boolean;
   created_at: string;
 };
+
+const NAME_MAX = 20;
+
+type MasterTab =
+  | "member"
+  | "priority"
+  | "status"
+  | "taskType"
+  | "template"
+  | "mail";
+
+// Ordered by how often they are actually opened, not by when they were built.
+// メンバー and 定型タスク get used as the team changes and as work is
+// registered; the second group only decides what things are called and what
+// colour they are, which is a decision made about once. Keeping them in one
+// flat list buried the two that matter.
+const TAB_GROUPS: {
+  heading: string;
+  tabs: { key: MasterTab; emoji: string; label: string }[];
+}[] = [
+  {
+    heading: "マスタ",
+    tabs: [
+      { key: "member", emoji: "👤", label: "メンバー" },
+      { key: "template", emoji: "📋", label: "定型タスク" },
+      { key: "mail", emoji: "✉️", label: "共有先" },
+    ],
+  },
+  {
+    heading: "呼び名・色",
+    tabs: [
+      { key: "priority", emoji: "🚩", label: "優先度" },
+      { key: "status", emoji: "📊", label: "状態" },
+      { key: "taskType", emoji: "🏷", label: "種別" },
+    ],
+  },
+];
 
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -22,37 +68,87 @@ export default function AdminUsersPage() {
   const token = session?.access_token;
 
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // Inline display-name editing: which row is open, and its draft value.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  // The account the delete dialog is asking about. Null while it is closed.
+  const [confirmDelete, setConfirmDelete] = useState<ManagedUser | null>(null);
+  const [tab, setTab] = useState<MasterTab>("member");
 
+  // 取得だけを行う（state は触らない）。state 更新と分けておくと、effect からは
+  // 「呼ぶ → .then で setState」の形にでき、effect 内の同期 setState を避けられる。
+  const fetchUsers = useCallback(async (): Promise<ManagedUser[]> => {
+    if (!token) return [];
+    const res = await fetch("/api/admin/users", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "取得に失敗しました。");
+    return json.users as ManagedUser[];
+  }, [token]);
+
+  /** 明示的な再読込（操作後など）。読み込み中表示を出し、前のエラーも消す。 */
   const load = useCallback(async () => {
-    if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/users", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "取得に失敗しました。");
-      setUsers(json.users as ManagedUser[]);
+      setUsers(await fetchUsers());
     } catch (e) {
       setError(errMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [fetchUsers]);
+
+  // 初回読み込み。setState はすべて then/catch/finally の中で行う。
+  useEffect(() => {
+    let alive = true;
+    fetchUsers()
+      .then((list) => {
+        if (alive) setUsers(list);
+      })
+      .catch((e) => {
+        if (alive) setError(errMessage(e));
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fetchUsers]);
+
+  // Tasks drive the "担当タスク" column and the per-panel usage counts. A
+  // failure here must not break user management, so it degrades to zero.
+  const loadTasks = useCallback(() => {
+    listTasks()
+      .then(setTasks)
+      .catch(() => setTasks([]));
+  }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadTasks();
+  }, [loadTasks]);
 
   const adminCount = users.filter((u) => u.role === "admin").length;
 
-  async function patch(userId: string, body: { role?: string; banned?: boolean }) {
+  const taskCountById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of tasks)
+      if (t.assignee_id) m.set(t.assignee_id, (m.get(t.assignee_id) ?? 0) + 1);
+    return m;
+  }, [tasks]);
+
+  async function patch(
+    userId: string,
+    body: { role?: string; banned?: boolean; name?: string },
+  ) {
     if (!token) return;
     setBusy(userId);
     setError(null);
@@ -69,6 +165,60 @@ export default function AdminUsersPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "更新に失敗しました。");
       await load();
+      return true;
+    } catch (e) {
+      setError(errMessage(e));
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function startEdit(u: ManagedUser) {
+    setEditingId(u.id);
+    setNameDraft(u.name ?? "");
+    setError(null);
+  }
+
+  async function saveName(userId: string) {
+    const next = nameDraft.trim();
+    if (!next) {
+      setError("表示名を入力してください。");
+      return;
+    }
+    const ok = await patch(userId, { name: next });
+    if (ok) {
+      setEditingId(null);
+      setNotice(
+        "仮の表示名を設定しました。タスク一覧の担当者名にも反映されます。本人が自分で設定すると「仮」が外れます。",
+      );
+    }
+  }
+
+  async function removeUser(u: ManagedUser) {
+    if (!token) return;
+    setBusy(u.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId: u.id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "削除に失敗しました。");
+      setConfirmDelete(null);
+      await load();
+      loadTasks();
+      setNotice(
+        json.movedTasks > 0
+          ? `アカウントを削除しました。担当していた ${json.movedTasks} 件のタスクには「${json.label}」が担当者名として残ります。`
+          : "アカウントを削除しました。",
+      );
     } catch (e) {
       setError(errMessage(e));
     } finally {
@@ -103,167 +253,508 @@ export default function AdminUsersPage() {
     }
   }
 
+  // Members with no display name at all — the count in the panel subtitle.
+  const needsAttention = users.filter((u) => !u.name).length;
+
   return (
-    <main className="min-h-screen" style={{ background: "#EAF3FB" }}>
-      {/* Forest-theme green header */}
-      <header
-        className="px-6 py-5 text-white"
-        style={{ background: "#2f9e77" }}
+    <main
+      className="flex min-h-screen flex-col pb-14 md:h-screen md:overflow-hidden md:pb-0"
+      style={{
+        color: C.ink,
+        background: `linear-gradient(180deg,#dceffb 0,#f3faff 180px,${C.card2} 180px)`,
+      }}
+    >
+      {/* App bar — breadcrumb + actions, mirroring the /tasks header. Full
+          width rather than inside the centred column, or the page would scroll
+          past in the margins beside it. shrink-0 keeps it its own height from
+          md up, where it is a flex row that never scrolls; sticky is what
+          holds it in place below md, where the page scrolls normally. */}
+      <div
+        className="sticky top-0 z-30 shrink-0"
+        style={{
+          background: "rgba(243,250,255,.92)",
+          backdropFilter: "blur(6px)",
+          borderBottom: `1px solid ${C.line}`,
+        }}
       >
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
+        <div className="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-3 px-5 pb-3 pt-4">
           <div>
-            <h1 className="text-lg font-bold">⚙ ユーザー管理</h1>
-            <p className="text-xs text-white/80">管理者のみが利用できます</p>
+            <div className="text-[0.82rem] font-semibold" style={{ color: C.muted }}>
+              進捗管理 ／ 設定 ／ マスタ管理
+            </div>
+            <h1 className="text-[1.35rem] font-extrabold">
+              メンバー（担当者）マスタ
+            </h1>
           </div>
-          <Link
-            href="/office"
-            className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-semibold transition hover:bg-white/25"
-          >
-            ← オフィスへ
-          </Link>
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-4xl p-6">
-        {/* Invite row (F8) */}
-        <form
-          onSubmit={invite}
-          className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-white p-3"
-        >
-          <input
-            type="email"
-            required
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            placeholder="招待するメールアドレス"
-            className="min-w-[220px] flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm"
-          />
-          <button
-            type="submit"
-            disabled={busy === "invite"}
-            className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            style={{ background: "#2f9e77" }}
-          >
-            {busy === "invite" ? "送信中…" : "メールで招待"}
-          </button>
-        </form>
-
-        {notice && (
-          <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {notice}
-          </p>
-        )}
-        {error && (
-          <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-            {error}
-          </p>
-        )}
-
-        {/* Users table (F5) */}
-        <div className="overflow-x-auto rounded-xl border border-black/5 bg-white">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-black/10 text-left text-xs text-zinc-500">
-                <th className="px-4 py-3">表示名</th>
-                <th className="px-4 py-3">メール</th>
-                <th className="px-4 py-3">ロール</th>
-                <th className="px-4 py-3">状態</th>
-                <th className="px-4 py-3">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-zinc-400">
-                    読み込み中…
-                  </td>
-                </tr>
-              ) : users.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-zinc-400">
-                    ユーザーがいません
-                  </td>
-                </tr>
-              ) : (
-                users.map((u) => {
-                  const isLastAdmin = u.role === "admin" && adminCount <= 1;
-                  const rowBusy = busy === u.id;
-                  return (
-                    <tr key={u.id} className="border-b border-black/5">
-                      <td className="px-4 py-3">{u.name ?? "—"}</td>
-                      <td className="px-4 py-3 text-zinc-600">{u.email ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className="rounded px-2 py-0.5 text-xs font-semibold"
-                          style={
-                            u.role === "admin"
-                              ? { background: "#EAF3DE", color: "#173404" }
-                              : { background: "#F1EFE8", color: "#444" }
-                          }
-                        >
-                          {u.role}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={
-                            u.banned
-                              ? "rounded px-2 py-0.5 text-xs font-semibold text-red-700"
-                              : "rounded px-2 py-0.5 text-xs font-semibold text-emerald-700"
-                          }
-                          style={{
-                            background: u.banned ? "#FCE8E8" : "#E7F5EC",
-                          }}
-                        >
-                          {u.banned ? "無効" : "有効"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {isLastAdmin ? (
-                          <span className="text-xs text-zinc-400">
-                            🔒 最後の管理者は変更不可
-                          </span>
-                        ) : (
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              disabled={rowBusy}
-                              onClick={() =>
-                                patch(u.id, {
-                                  role:
-                                    u.role === "admin" ? "general" : "admin",
-                                })
-                              }
-                              className="rounded border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                            >
-                              {u.role === "admin"
-                                ? "generalにする"
-                                : "adminにする"}
-                            </button>
-                            <button
-                              disabled={rowBusy}
-                              onClick={() =>
-                                patch(u.id, { banned: !u.banned })
-                              }
-                              className="rounded border px-2 py-1 text-xs font-semibold disabled:opacity-50"
-                              style={
-                                u.banned
-                                  ? { borderColor: "#2f9e77", color: "#173404" }
-                                  : { borderColor: "#e0b4b4", color: "#a12a2a" }
-                              }
-                            >
-                              {u.banned ? "有効に戻す" : "無効化"}
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/tasks"
+              className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[0.84rem] font-bold"
+              style={{
+                border: `1px solid ${C.accent}`,
+                color: C.accentInk,
+                background: C.card,
+              }}
+            >
+              ✅ 進捗管理へ戻る
+            </Link>
+            <Link
+              href="/office"
+              className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[0.84rem] font-bold"
+              style={{
+                border: `1px solid ${C.accent}`,
+                color: C.accentInk,
+                background: C.card,
+              }}
+            >
+              ← オフィスへ
+            </Link>
+          </div>
         </div>
       </div>
+
+      {/* From md up the page itself does not scroll: the app bar and the tab
+          list keep their place and only the panel column moves. Below md there
+          is no side to pin anything to, so it falls back to page scroll. */}
+      <div className="mx-auto grid w-full max-w-[1120px] gap-4 px-5 pt-4 md:min-h-0 md:flex-1 md:grid-cols-[244px_1fr]">
+        <nav
+          className="self-start p-2.5"
+          style={CARD_STYLE}
+          aria-label="マスタの種類"
+        >
+          {TAB_GROUPS.map((group, gi) => (
+            <div key={group.heading} className={gi > 0 ? "mt-3" : undefined}>
+              <h3
+                className="mx-2 mb-2 mt-1.5 text-[0.72rem] font-extrabold uppercase tracking-[0.09em]"
+                style={{
+                  color: C.muted,
+                  borderTop: gi > 0 ? `1px solid ${C.line}` : undefined,
+                  paddingTop: gi > 0 ? 10 : undefined,
+                }}
+              >
+                {group.heading}
+              </h3>
+              {group.tabs.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  aria-current={tab === t.key ? "page" : undefined}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[0.86rem] font-bold"
+                  style={
+                    tab === t.key
+                      ? { background: C.accent, color: "#fff" }
+                      : { color: C.ink }
+                  }
+                >
+                  <span className="w-[1.15em] text-center">{t.emoji}</span>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        {/* The only thing that scrolls from md up. */}
+        <div className="pb-5 md:min-h-0 md:overflow-y-auto">
+          {tab === "priority" && <PriorityPanel tasks={tasks} />}
+          {tab === "status" && <StatusPanel tasks={tasks} />}
+          {tab === "taskType" && <TaskTypePanel tasks={tasks} />}
+          {tab === "template" && <TemplatePanel />}
+          {tab === "mail" && <MailPanel />}
+
+          {tab === "member" && (
+          <section className="px-5 py-4" style={CARD_STYLE}>
+            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="text-[1.05rem] font-extrabold">👤 メンバー一覧</h2>
+              <span className="text-[0.82rem]" style={{ color: C.muted }}>
+                {loading
+                  ? "読み込み中…"
+                  : needsAttention > 0
+                    ? `${users.length}件中 ${needsAttention}件が要整備`
+                    : `${users.length}件`}
+              </span>
+            </div>
+            <p className="mb-3.5 mt-1.5 text-[0.86rem]" style={{ color: C.muted }}>
+              <b style={{ color: C.ink }}>表示名が空の行が要整備です。</b>
+              「仮の表示名を設定」から入力すると、タスク一覧の担当者欄がメールアドレスから名前に変わります。
+              入れた名前は <b style={{ color: C.ink }}>仮</b> の扱いで、本人が自分で設定するまでは直せます。
+            </p>
+
+            {/* Invite (F8) */}
+            <form
+              onSubmit={invite}
+              className="mb-3 flex flex-wrap items-center gap-2 rounded-xl p-2.5"
+              style={{ background: C.card2, border: `1px solid ${C.line}` }}
+            >
+              <input
+                type="email"
+                required
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="招待するメールアドレス"
+                className="min-w-[220px] flex-1 rounded-lg px-3 py-2 text-sm"
+                style={{ border: `1px solid ${C.line}`, background: C.card }}
+              />
+              <button
+                type="submit"
+                disabled={busy === "invite"}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                style={{ background: C.accent }}
+              >
+                {busy === "invite" ? "送信中…" : "＋ メールで招待"}
+              </button>
+            </form>
+
+            {notice && (
+              <p
+                className="mb-3 rounded-lg px-3 py-2 text-sm"
+                style={{ background: C.accentSoft, color: C.accentInk }}
+              >
+                {notice}
+              </p>
+            )}
+            {error && (
+              <p
+                className="mb-3 rounded-lg px-3 py-2 text-sm"
+                style={{ background: C.dangerBg, color: C.danger }}
+              >
+                {error}
+              </p>
+            )}
+
+            <div
+              className="overflow-x-auto rounded-xl"
+              style={{ border: `1px solid ${C.line}` }}
+            >
+              <table className="w-full min-w-[680px] border-collapse text-[0.85rem]">
+                <thead>
+                  <tr>
+                    {["表示名", "ログインアカウント", "ロール", "状態", "担当タスク", "操作"].map(
+                      (h) => (
+                        <th
+                          key={h}
+                          className="whitespace-nowrap px-3 py-2.5 text-left text-[0.72rem] font-extrabold uppercase tracking-[0.06em]"
+                          style={{
+                            background: C.card2,
+                            color: C.muted,
+                            borderBottom: `1px solid ${C.line}`,
+                            textAlign: h === "担当タスク" ? "right" : "left",
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ),
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-6 text-center" style={{ color: C.muted }}>
+                        読み込み中…
+                      </td>
+                    </tr>
+                  ) : users.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-3 py-6 text-center" style={{ color: C.muted }}>
+                        ユーザーがいません
+                      </td>
+                    </tr>
+                  ) : (
+                    users.map((u) => {
+                      const isLastAdmin = u.role === "admin" && adminCount <= 1;
+                      const rowBusy = busy === u.id;
+                      const editing = editingId === u.id;
+                      const attn = !u.name;
+                      // Owner-set names are off limits to admins (see the API).
+                      const canEditName = !u.name || u.provisional;
+                      const isSelf = session?.user.id === u.id;
+                      return (
+                        <tr
+                          key={u.id}
+                          style={{
+                            borderBottom: `1px solid ${C.line}`,
+                            background: attn ? "#fff7ed" : undefined,
+                          }}
+                        >
+                          <td className="px-3 py-2.5 font-bold">
+                            {editing ? (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <input
+                                  autoFocus
+                                  value={nameDraft}
+                                  maxLength={NAME_MAX}
+                                  onChange={(e) => setNameDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") saveName(u.id);
+                                    if (e.key === "Escape") setEditingId(null);
+                                  }}
+                                  placeholder="表示名"
+                                  className="w-32 rounded-lg px-2 py-1 text-sm font-normal"
+                                  style={{ border: `1px solid ${C.accent}`, background: C.card }}
+                                />
+                                <button
+                                  disabled={rowBusy}
+                                  onClick={() => saveName(u.id)}
+                                  className="rounded-lg px-2.5 py-1 text-xs font-bold text-white disabled:opacity-50"
+                                  style={{ background: C.accent }}
+                                >
+                                  {rowBusy ? "保存中…" : "保存"}
+                                </button>
+                                <button
+                                  disabled={rowBusy}
+                                  onClick={() => setEditingId(null)}
+                                  className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                  style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            ) : u.name ? (
+                              // 仮バッジは名前の上。横に並べると、その分だけ
+                              // 名前に使える幅が減り、日本語はどこでも改行
+                              // できるので「ほ／り／ち」と1文字ずつ縦に折れる。
+                              <span className="flex flex-col items-start gap-0.5">
+                                {u.provisional && (
+                                  <Pill bg={C.warnBg} color={C.warn}>
+                                    仮
+                                  </Pill>
+                                )}
+                                <span className="whitespace-nowrap">
+                                  {u.name}
+                                </span>
+                              </span>
+                            ) : (
+                              <Pill bg={C.warnBg} color={C.warn}>
+                                表示名なし
+                              </Pill>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-[0.8rem]" style={{ color: C.muted }}>
+                            {u.email ?? "—"}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {u.role === "admin" ? (
+                              <Pill bg={C.infoBg} color={C.info}>
+                                管理者
+                              </Pill>
+                            ) : (
+                              <Pill bg={C.card2} color={C.muted} outlined>
+                                一般
+                              </Pill>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {u.banned ? (
+                              <Pill bg={C.dangerBg} color={C.danger}>
+                                無効
+                              </Pill>
+                            ) : (
+                              <Pill bg={C.accentSoft} color={C.accentInk}>
+                                有効
+                              </Pill>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">
+                            {taskCountById.get(u.id) ?? 0}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex flex-wrap gap-1.5">
+                              {!editing && canEditName && (
+                                <button
+                                  disabled={rowBusy}
+                                  onClick={() => startEdit(u)}
+                                  className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                  style={
+                                    attn
+                                      ? {
+                                          border: `1px solid ${C.accent}`,
+                                          color: C.accentInk,
+                                          background: C.accentSoft,
+                                        }
+                                      : { border: `1px solid ${C.line}`, color: C.ink }
+                                  }
+                                >
+                                  {attn ? "仮の表示名を設定" : "仮の名前を直す"}
+                                </button>
+                              )}
+                              {isLastAdmin ? (
+                                <span className="text-xs" style={{ color: C.muted }}>
+                                  🔒 最後の管理者は変更不可
+                                </span>
+                              ) : (
+                                <>
+                                  {/* Role, ban and delete all lock the caller
+                                      out of administration if aimed at their
+                                      own row, and an accidental one could not
+                                      be undone — another admin has to do it.
+                                      The API refuses these too. Editing your
+                                      own display name stays available. */}
+                                  {!isSelf && (
+                                    <>
+                                      <button
+                                        disabled={rowBusy}
+                                        onClick={() =>
+                                          patch(u.id, {
+                                            role: u.role === "admin" ? "general" : "admin",
+                                          })
+                                        }
+                                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                        style={{ border: `1px solid ${C.line}`, color: C.ink }}
+                                      >
+                                        {u.role === "admin" ? "一般にする" : "管理者にする"}
+                                      </button>
+                                      <button
+                                        disabled={rowBusy}
+                                        onClick={() => patch(u.id, { banned: !u.banned })}
+                                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                        style={
+                                          u.banned
+                                            ? { border: `1px solid ${C.accent}`, color: C.accentInk }
+                                            : { border: "1px solid #e0b4b4", color: "#a12a2a" }
+                                        }
+                                      >
+                                        {u.banned ? "有効に戻す" : "無効化"}
+                                      </button>
+                                      <button
+                                        disabled={rowBusy}
+                                        onClick={() => setConfirmDelete(u)}
+                                        className="rounded-lg px-2.5 py-1 text-xs font-bold disabled:opacity-50"
+                                        style={{ border: `1px solid ${C.danger}`, color: C.danger }}
+                                      >
+                                        削除
+                                      </button>
+                                    </>
+                                  )}
+                                  {isSelf && (
+                                    <span className="text-xs" style={{ color: C.muted }}>
+                                      🔒 自分のロール変更・無効化・削除はできません
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+          </section>
+          )}
+        </div>
+      </div>
+
+      {/* Deletion is irreversible and reaches beyond this screen, so the dialog
+          spells out what goes and points at 無効化 as the reversible option. */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-5"
+          style={{ background: "rgba(12,20,10,.45)" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfirmDelete(null);
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="del-title"
+        >
+          <div
+            className="w-full max-w-[520px] px-5 py-5"
+            style={{ ...CARD_STYLE, boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}
+          >
+            <h3 id="del-title" className="mb-1.5 text-[1.02rem] font-extrabold">
+              本当にこのアカウントを削除しますか？
+            </h3>
+            <p className="mb-3.5 text-[0.86rem]" style={{ color: C.muted }}>
+              この操作は<b style={{ color: C.danger }}>元に戻せません</b>。
+            </p>
+
+            <div
+              className="rounded-xl px-3.5 py-3 text-[0.85rem]"
+              style={{ background: C.card2, border: `1px solid ${C.line}` }}
+            >
+              <div className="flex justify-between gap-2.5 py-1">
+                <span className="font-bold" style={{ color: C.muted }}>
+                  表示名
+                </span>
+                <span className="font-bold">
+                  {confirmDelete.name ?? "（未設定）"}
+                </span>
+              </div>
+              <div
+                className="flex justify-between gap-2.5 py-1"
+                style={{ borderTop: `1px dashed ${C.line}` }}
+              >
+                <span className="font-bold" style={{ color: C.muted }}>
+                  ログインアカウント
+                </span>
+                <span className="font-mono text-[0.8rem]">
+                  {confirmDelete.email ?? "—"}
+                </span>
+              </div>
+              <div
+                className="flex justify-between gap-2.5 py-1"
+                style={{ borderTop: `1px dashed ${C.line}` }}
+              >
+                <span className="font-bold" style={{ color: C.muted }}>
+                  担当タスク
+                </span>
+                <span className="font-bold tabular-nums">
+                  {taskCountById.get(confirmDelete.id) ?? 0} 件
+                </span>
+              </div>
+            </div>
+
+            <div
+              className="mt-3 rounded-xl px-3 py-2.5 text-[0.84rem]"
+              style={{ background: C.warnBg }}
+            >
+              <b style={{ color: C.warn }}>削除すると：</b>
+              <ul className="mt-1 list-disc pl-5">
+                <li>
+                  担当していたタスクには、担当者名が
+                  <b>「{confirmDelete.name ?? confirmDelete.email ?? "削除されたユーザー"}」</b>
+                  という文字だけ残ります（一覧の表示は変わりません）
+                </li>
+                <li>
+                  そのユーザーの<b>AI内田さんの会話履歴も一緒に消えます</b>
+                </li>
+                <li>ログインもできなくなり、同じアカウントには戻せません</li>
+              </ul>
+            </div>
+
+            <p
+              className="mt-3 rounded-xl px-3 py-2.5 text-[0.82rem]"
+              style={{ background: C.card2, border: `1px dashed ${C.line}`, color: C.muted }}
+            >
+              <b style={{ color: C.ink }}>一時的に止めたいだけなら「無効化」</b>を使ってください。
+              ログインだけ止まり、記録は残り、あとから元に戻せます。
+            </p>
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="rounded-xl px-4 py-2 text-sm font-bold"
+                style={{ border: `1px solid ${C.line}`, color: C.ink, background: C.card }}
+              >
+                キャンセル
+              </button>
+              <button
+                disabled={busy === confirmDelete.id}
+                onClick={() => removeUser(confirmDelete)}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                style={{ background: C.danger }}
+              >
+                {busy === confirmDelete.id ? "削除中…" : "削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

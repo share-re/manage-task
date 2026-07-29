@@ -4,6 +4,8 @@ import {
   completionValue,
   productivity,
   leafProgress,
+  estimateAchievement,
+  freezeBaseline,
   type Task,
 } from "../../src/lib/tasks";
 
@@ -19,13 +21,53 @@ function mk(p: Partial<Task> & { id: string }): Task {
     task_type: null,
     estimated_hours: null,
     actual_hours: null,
+    start_date: null,
+    baseline_start: null,
+    baseline_due: null,
+    project_id: null,
     parent_id: null,
     created_by: null,
     created_at: "",
     completed_at: null,
+    quality_checked_at: null,
     ...p,
   };
 }
+
+describe("freezeBaseline（当初計画の初回凍結）", () => {
+  it("baseline が空なら現在の開始日/期限で埋める", () => {
+    expect(
+      freezeBaseline(
+        { baseline_start: null, baseline_due: null },
+        "2026-07-10",
+        "2026-07-20",
+      ),
+    ).toEqual({ baselineStart: "2026-07-10", baselineDue: "2026-07-20" });
+  });
+
+  it("凍結済みは上書きしない（空の側だけ埋める）", () => {
+    expect(
+      freezeBaseline(
+        { baseline_start: null, baseline_due: "2026-07-20" },
+        "2026-07-10",
+        "2026-07-25", // 期限を変えても baseline_due は動かさない
+      ),
+    ).toEqual({ baselineStart: "2026-07-10" });
+  });
+
+  it("日付が無ければ何も返さない", () => {
+    expect(
+      freezeBaseline({ baseline_start: null, baseline_due: null }, "", ""),
+    ).toEqual({});
+    expect(
+      freezeBaseline(
+        { baseline_start: "2026-07-10", baseline_due: "2026-07-20" },
+        "2026-07-01",
+        "2026-07-30",
+      ),
+    ).toEqual({});
+  });
+});
 
 describe("difficultyFromEstimate（見積り→難易度の自動判定）", () => {
   it("見積りなし・不正値は null（未設定）", () => {
@@ -88,6 +130,36 @@ describe("productivity（生産性＝成果ポイント÷実績時間）", () =>
       mk({ id: "b", status: "todo", priority: "mid", actual_hours: 5 }),
     ];
     expect(productivity(tasks)).toBeNull();
+  });
+});
+
+describe("estimateAchievement（見積り達成率＝見積h÷実績h）", () => {
+  it("完了かつ見積り・実績の両方があるタスクだけで算出する", () => {
+    const tasks = [
+      mk({ id: "a", status: "done", estimated_hours: 8, actual_hours: 6 }),
+      mk({ id: "b", status: "done", estimated_hours: 4, actual_hours: 6 }),
+      mk({ id: "c", status: "done", estimated_hours: null, actual_hours: 3 }), // 見積りなし→除外
+      mk({ id: "d", status: "todo", estimated_hours: 5, actual_hours: 5 }), // 未完了→除外
+    ];
+    // (8+4) / (6+6) = 1.0、対象は2件
+    expect(estimateAchievement(tasks)).toEqual({ ratio: 1, count: 2 });
+  });
+
+  it("見積りより速ければ 1.0 を上回る", () => {
+    const tasks = [
+      mk({ id: "a", status: "done", estimated_hours: 9, actual_hours: 6 }),
+    ];
+    expect(estimateAchievement(tasks)).toEqual({ ratio: 1.5, count: 1 });
+  });
+
+  it("対象が1件もなければ null（未計測）", () => {
+    expect(estimateAchievement([])).toBeNull();
+    expect(
+      estimateAchievement([
+        mk({ id: "a", status: "done", estimated_hours: null, actual_hours: 2 }),
+        mk({ id: "b", status: "done", estimated_hours: 3, actual_hours: null }),
+      ]),
+    ).toBeNull();
   });
 });
 

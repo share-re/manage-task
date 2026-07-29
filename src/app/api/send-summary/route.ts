@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildProgressSummary } from "@/lib/summary";
 import { sendMail } from "@/lib/mailer";
+import {
+  resolveSummaryRecipients,
+  type MailRecipientRow,
+} from "@/lib/mailRecipients";
 import type { Task } from "@/lib/tasks";
 
 export const runtime = "nodejs";
@@ -104,6 +108,30 @@ async function runSend(opts: {
     if (to.length === 0 && bcc.length === 0) {
       bcc = parseList(settings?.recipients); // legacy fallback
     }
+
+    // The 共有先 master takes over once it holds at least one enabled row.
+    // Until then the hand-typed strings above stay in charge, so creating the
+    // table changes nothing on its own.
+    const { data: recipientRows } = await supabaseAdmin
+      .from("mail_recipients")
+      .select("id, user_id, email, label, send_as, enabled")
+      .order("sort_order", { ascending: true });
+    if (recipientRows?.length) {
+      // Member addresses live in profiles, never copied into the master, so a
+      // changed address takes effect without touching the recipient list.
+      const { data: addrRows } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email");
+      const emailByUserId = new Map<string, string | null>();
+      for (const p of addrRows ?? [])
+        emailByUserId.set(p.id as string, (p.email as string | null) ?? null);
+
+      ({ to, bcc } = resolveSummaryRecipients(
+        recipientRows as MailRecipientRow[],
+        emailByUserId,
+        { to, bcc },
+      ));
+    }
   }
   if (to.length === 0 && bcc.length === 0) {
     return NextResponse.json(
@@ -138,12 +166,23 @@ async function runSend(opts: {
     labelById.set(p.id as string, label);
   }
 
+  // Status labels from the master, so a renamed status reads the same in the
+  // mail as it does on screen. Absent table -> defaults inside buildProgressSummary.
+  const { data: statusRows } = await supabaseAdmin
+    .from("task_statuses")
+    .select("code, label");
+  const statusLabels: Record<string, string> = {};
+  for (const s of statusRows ?? [])
+    if (typeof s.label === "string" && s.label.trim())
+      statusLabels[s.code as string] = s.label.trim();
+
   const jl = nowJst();
   const dateLabel = `${jl.getUTCFullYear()}/${jl.getUTCMonth() + 1}/${jl.getUTCDate()}`;
   const summary = buildProgressSummary((tasks ?? []) as Task[], {
     dateLabel,
     lastSentAt: settings?.last_sent_at ?? null,
     labelById,
+    statusLabels,
   });
 
   // Record every attempt in the send history (best-effort; never blocks send).

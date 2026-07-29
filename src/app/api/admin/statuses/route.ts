@@ -1,7 +1,6 @@
 import { requireAdmin } from "@/lib/adminAuth";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { isStatusColor, STATUS_LABEL_MAX } from "@/lib/statuses";
-import { isTaskStatus } from "@/lib/tasks";
+import { validateStatusDraft } from "@/lib/masterDrafts";
 
 export const runtime = "nodejs";
 
@@ -16,40 +15,14 @@ export async function PATCH(req: Request) {
   const g = await requireAdmin(req);
   if (!g.ok) return Response.json({ error: g.error }, { status: g.status });
 
-  const body = (await req.json().catch(() => ({}))) as {
-    code?: string;
-    label?: string;
-    color?: string;
-  };
-
-  // The code is not editable, and no fourth status may be added: "done" in
-  // particular is tested for throughout the app (progress, archiving, the
-  // forest, the parent/child sync), so the set has to stay what the code knows.
-  if (!isTaskStatus(body.code))
-    return Response.json(
-      { error: "状態の種類が正しくありません。" },
-      { status: 400 },
-    );
-
-  const label = typeof body.label === "string" ? body.label.trim() : "";
-  if (!label)
-    return Response.json({ error: "表示名を入力してください。" }, { status: 400 });
-  if (label.length > STATUS_LABEL_MAX)
-    return Response.json(
-      { error: `表示名は${STATUS_LABEL_MAX}文字以内で入力してください。` },
-      { status: 400 },
-    );
-
-  if (!isStatusColor(body.color))
-    return Response.json({ error: "色が正しくありません。" }, { status: 400 });
+  const parsed = validateStatusDraft(
+    (await req.json().catch(() => ({}))) as Record<string, unknown>,
+  );
+  if (!parsed.ok)
+    return Response.json({ error: parsed.error }, { status: 400 });
 
   const supabaseAdmin = getSupabaseAdmin();
-  const { error } = await supabaseAdmin.from("task_statuses").upsert({
-    code: body.code,
-    label,
-    color: body.color,
-    updated_at: new Date().toISOString(),
-  });
+  const { error } = await supabaseAdmin.from("task_statuses").upsert({ ...parsed.value, updated_at: new Date().toISOString() });
   if (error) {
     const missing = /task_statuses/i.test(error.message);
     return Response.json(

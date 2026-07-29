@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   drawWorld,
@@ -252,10 +252,14 @@ export default function World({ progress, playerName, userId, playerColor, statu
     };
   }, [userId]);
 
-  const hold = (k: string, on: boolean) => (e: React.PointerEvent) => {
+  // 方向パッドの押下/解放。ハンドラは「関数を渡す」形にし、レンダー中に呼ばない
+  // （hold("w", true) のようにレンダーで実行すると ref アクセスが render 扱いになる）。
+  // 対象キーは data-key、押下か解放かはイベント種別から決める。
+  const hold = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    keys.current[k] = on;
-  };
+    const k = e.currentTarget.dataset.key;
+    if (k) keys.current[k] = e.type === "pointerdown";
+  }, []);
   const padBtn =
     "flex h-14 w-14 items-center justify-center rounded-xl bg-white/80 text-lg shadow ring-1 ring-black/10 active:bg-emerald-200 select-none";
 
@@ -311,11 +315,11 @@ export default function World({ progress, playerName, userId, playerColor, statu
       />
       <div className="pointer-events-none absolute bottom-5 right-5 grid grid-cols-3 grid-rows-2 gap-2 md:hidden">
         <span />
-        <button className={`pointer-events-auto ${padBtn}`} onPointerDown={hold("w", true)} onPointerUp={hold("w", false)} onPointerLeave={hold("w", false)}>▲</button>
+        <button className={`pointer-events-auto ${padBtn}`} data-key="w" onPointerDown={hold} onPointerUp={hold} onPointerLeave={hold}>▲</button>
         <span />
-        <button className={`pointer-events-auto ${padBtn}`} onPointerDown={hold("a", true)} onPointerUp={hold("a", false)} onPointerLeave={hold("a", false)}>◀</button>
-        <button className={`pointer-events-auto ${padBtn}`} onPointerDown={hold("s", true)} onPointerUp={hold("s", false)} onPointerLeave={hold("s", false)}>▼</button>
-        <button className={`pointer-events-auto ${padBtn}`} onPointerDown={hold("d", true)} onPointerUp={hold("d", false)} onPointerLeave={hold("d", false)}>▶</button>
+        <button className={`pointer-events-auto ${padBtn}`} data-key="a" onPointerDown={hold} onPointerUp={hold} onPointerLeave={hold}>◀</button>
+        <button className={`pointer-events-auto ${padBtn}`} data-key="s" onPointerDown={hold} onPointerUp={hold} onPointerLeave={hold}>▼</button>
+        <button className={`pointer-events-auto ${padBtn}`} data-key="d" onPointerDown={hold} onPointerUp={hold} onPointerLeave={hold}>▶</button>
       </div>
     </div>
   );

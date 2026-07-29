@@ -125,6 +125,12 @@ describe("notificationText", () => {
     );
   });
 
+  it("品質の記録（finding）の通知文を作る", () => {
+    expect(notificationText(make({ type: "finding" }))).toBe(
+      "柴田さんが「QA表作成」に不具合・指摘を記録しました",
+    );
+  });
+
   it("未知の種別でも文言が欠けない", () => {
     expect(notificationText(make({ type: "unknown" }))).toBe(
       "柴田さんから通知があります",

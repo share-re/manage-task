@@ -12,7 +12,7 @@ import NotificationBell from "./NotificationBell";
 
 const NAV: { href: string; label: string; icon: React.FC }[] = [
   { href: "/tasks", label: "進捗管理", icon: IconList },
-  // 「品質」タブはここに入る予定（品質機能の実装PRで追加する）。
+  { href: "/tasks/quality", label: "品質", icon: IconBug },
   { href: "/tasks/time-entry", label: "工数入力", icon: IconClock },
   { href: "/tasks/dashboard", label: "ダッシュボード", icon: IconChart },
   { href: "/tasks/gantt", label: "ガントチャート", icon: IconGantt },
@@ -163,6 +163,17 @@ function IconChart() {
       <rect x="4" y="12" width="3.4" height="7" rx="0.8" />
       <rect x="10.3" y="8" width="3.4" height="11" rx="0.8" />
       <rect x="16.6" y="4" width="3.4" height="15" rx="0.8" />
+    </svg>
+  );
+}
+
+// 品質タブ（テスト以降に見つかった不具合・指摘）。
+function IconBug() {
+  return (
+    <svg {...svgProps()}>
+      <path d="M9 6a3 3 0 0 1 6 0" />
+      <rect x="7" y="8" width="10" height="11" rx="5" />
+      <path d="M3 12h4M17 12h4M4.5 7.5 7 9M19.5 7.5 17 9M4.5 17.5 7 16M19.5 17.5 17 16" />
     </svg>
   );
 }

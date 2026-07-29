@@ -9,7 +9,7 @@ export const NOTIFICATION_LIMIT = 50;
 
 export type AppNotification = {
   id: string;
-  type: string; // 今は "concern_note" のみ
+  type: string; // "concern_note"（懸念メモ）／"finding"（品質の記録）
   task_id: string | null;
   note_id: string | null;
   read: boolean;
@@ -109,6 +109,8 @@ export function unreadCount(list: AppNotification[]): number {
 export function notificationText(n: AppNotification): string {
   const who = n.actorName ?? "誰か";
   const task = n.taskTitle ?? "タスク";
+  if (n.type === "finding")
+    return `${who}さんが「${task}」に不具合・指摘を記録しました`;
   if (n.type === "concern_note")
     return `${who}さんが「${task}」に懸念メモを追加しました`;
   return `${who}さんから通知があります`;

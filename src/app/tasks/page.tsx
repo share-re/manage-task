@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useAuth } from "@/components/AuthProvider";
 import {
   buildTaskTree,
@@ -15,11 +21,8 @@ import {
   updateTask,
   updateTaskStatus,
   completeTask,
-  STATUS_META,
   STATUS_ORDER,
-  PRIORITY_META,
   PRIORITY_ORDER,
-  TASK_TYPE_META,
   TASK_TYPE_ORDER,
   DIFFICULTY_META,
   difficultyFromEstimate,
@@ -56,6 +59,24 @@ import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
 import ForestBackground from "@/components/ForestBackground";
 import FeatureProgress from "@/components/FeatureProgress";
+// 優先度・状態・種別の「表示名と色」はマスタ（DB）から読む。テーブルが無い／
+// 読めないときは DEFAULT_* が返るので、一覧が真っ白になることはない。
+import {
+  DEFAULT_PRIORITY_META,
+  loadPriorityMeta,
+  type PriorityMetaMap,
+} from "@/lib/priorities";
+import {
+  DEFAULT_STATUS_META,
+  loadStatusMeta,
+  type StatusMetaMap,
+} from "@/lib/statuses";
+import {
+  DEFAULT_TASK_TYPE_META,
+  loadTaskTypeMeta,
+  type TaskTypeMetaMap,
+} from "@/lib/taskTypes";
+import TemplateModal from "./TemplateModal";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
@@ -167,6 +188,9 @@ function TaskRow({
   labelById,
   currentUserId,
   canModerate,
+  priorityMeta,
+  statusMeta,
+  taskTypeMeta,
   onSave,
   childActualHours = 0,
   highlight = false,
@@ -207,6 +231,12 @@ function TaskRow({
   labelById: Map<string, string>;
   currentUserId: string | null;
   canModerate: boolean;
+  // 優先度の表示名・色（マスタ由来。@/lib/priorities）
+  priorityMeta: PriorityMetaMap;
+  // 状態の表示名・色（マスタ由来。@/lib/statuses）
+  statusMeta: StatusMetaMap;
+  // 種別の表示名（マスタ由来。@/lib/taskTypes）
+  taskTypeMeta: TaskTypeMetaMap;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
   childActualHours?: number;
   /** 品質タブなどから飛んできた対象。見つけやすいよう枠を強調する。 */
@@ -301,7 +331,7 @@ function TaskRow({
           ? "ring-2 ring-[#639922]"
           : "ring-1 ring-black/5"
       } ${isChild ? "bg-zinc-50" : "bg-white"}`}
-      style={{ borderLeftColor: STATUS_META[task.status].barColor }}
+      style={{ borderLeftColor: statusMeta[task.status].barColor }}
     >
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
@@ -333,9 +363,9 @@ function TaskRow({
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
             <span
-              className={`rounded px-1.5 py-0.5 font-medium ${PRIORITY_META[task.priority].badgeClass}`}
+              className={`rounded px-1.5 py-0.5 font-medium ${priorityMeta[task.priority].badgeClass}`}
             >
-              優先 {PRIORITY_META[task.priority].label}
+              優先 {priorityMeta[task.priority].label}
             </span>
             {/* Difficulty tag: outlined (vs. the filled priority badge) so the
                 two "中" labels can never be confused. Shown only when an
@@ -439,11 +469,11 @@ function TaskRow({
               onChangeStatus(task.id, e.target.value as TaskStatus)
             }
             aria-label="状態"
-            className={`cursor-pointer rounded-full border-0 px-2.5 py-1 text-xs font-medium outline-none ${STATUS_META[task.status].badgeClass}`}
+            className={`cursor-pointer rounded-full border-0 px-2.5 py-1 text-xs font-medium outline-none ${statusMeta[task.status].badgeClass}`}
           >
             {STATUS_ORDER.map((s) => (
               <option key={s} value={s}>
-                {STATUS_META[s].label}
+                {statusMeta[s].label}
               </option>
             ))}
           </select>
@@ -518,7 +548,7 @@ function TaskRow({
                 >
                   {STATUS_ORDER.map((s) => (
                     <option key={s} value={s}>
-                      {STATUS_META[s].label}
+                      {statusMeta[s].label}
                     </option>
                   ))}
                 </select>
@@ -538,7 +568,7 @@ function TaskRow({
                 >
                   {PRIORITY_ORDER.map((p) => (
                     <option key={p} value={p}>
-                      {PRIORITY_META[p].label}
+                      {priorityMeta[p].label}
                     </option>
                   ))}
                 </select>
@@ -555,7 +585,7 @@ function TaskRow({
                   <option value="">種別なし</option>
                   {TASK_TYPE_ORDER.map((t) => (
                     <option key={t} value={t}>
-                      {TASK_TYPE_META[t].label}
+                      {taskTypeMeta[t].label}
                     </option>
                   ))}
                 </select>
@@ -765,8 +795,19 @@ export default function TasksPage() {
   );
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // 定型タスクのモーダルを開いているか。
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   // Registered users for the assignee picker (from the profiles table).
   const [members, setMembers] = useState<Member[]>([]);
+  // Priority labels/colors from the master table. Starts as the compiled-in
+  // defaults so the first paint matches what loads a moment later.
+  const [priorityMeta, setPriorityMeta] =
+    useState<PriorityMetaMap>(DEFAULT_PRIORITY_META);
+  const [statusMeta, setStatusMeta] =
+    useState<StatusMetaMap>(DEFAULT_STATUS_META);
+  const [taskTypeMeta, setTaskTypeMeta] = useState<TaskTypeMetaMap>(
+    DEFAULT_TASK_TYPE_META,
+  );
   // profiles.id -> current display label, used to render task.assignee_id.
   const labelById = useMemo(() => {
     const m = new Map<string, string>();
@@ -830,6 +871,17 @@ export default function TasksPage() {
     getEmptyString,
   );
 
+  // Re-read the task list. Also used after generating from a template, which
+  // inserts a parent and its children in one go.
+  const reloadTasks = useCallback(async () => {
+    try {
+      setTasks(await listTasks());
+    } catch (err) {
+      console.error(err);
+      setError("タスクの読み込みに失敗しました。");
+    }
+  }, []);
+
   useEffect(() => {
     listTasks()
       .then(setTasks)
@@ -849,6 +901,22 @@ export default function TasksPage() {
     getDefaultProjectId()
       .then(setDefaultProjectId)
       .catch((err) => console.error("案件の読み込みに失敗:", err));
+
+    // 優先度マスタ。loadPriorityMeta が既定値へフォールバックするので、
+    // task_priorities が無くてもバッジは従来どおりの見た目になる。
+    loadPriorityMeta()
+      .then(setPriorityMeta)
+      .catch((err) => console.error("優先度マスタの読み込みに失敗:", err));
+
+    // 状態マスタ。同様に、無ければバッジと行の左バーは従来どおり。
+    loadStatusMeta()
+      .then(setStatusMeta)
+      .catch((err) => console.error("状態マスタの読み込みに失敗:", err));
+
+    // 種別マスタ。こちらは表示名のみ（色は持たない）。
+    loadTaskTypeMeta()
+      .then(setTaskTypeMeta)
+      .catch((err) => console.error("種別マスタの読み込みに失敗:", err));
   }, []);
 
   // 懸念メモは task の id が要るので、タスク読み込み後にまとめて1回取得する。
@@ -1367,7 +1435,7 @@ export default function TasksPage() {
       status: (a, b) =>
         STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status),
       priority: (a, b) =>
-        PRIORITY_META[a.priority].order - PRIORITY_META[b.priority].order,
+        priorityMeta[a.priority].order - priorityMeta[b.priority].order,
     };
     if (sortKey !== "default") list.sort(comparators[sortKey]);
     return list;
@@ -1379,6 +1447,9 @@ export default function TasksPage() {
     sortKey,
     search,
     labelById,
+    // 「優先度が高い順」の並び替えが priorityMeta の order を見ているので、
+    // マスタが読み込まれたタイミングで並べ直す必要がある。
+    priorityMeta,
   ]);
 
   const tree = useMemo(() => buildTaskTree(openTasks), [openTasks]);
@@ -1461,6 +1532,9 @@ export default function TasksPage() {
       labelById={labelById}
       currentUserId={session?.user?.id ?? null}
       canModerate={isAdmin(session)}
+      priorityMeta={priorityMeta}
+      statusMeta={statusMeta}
+      taskTypeMeta={taskTypeMeta}
       onSave={handleUpdate}
     />
   );
@@ -1482,26 +1556,7 @@ export default function TasksPage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
         <div className="flex items-center gap-2">
-          <Link
-            href="/tasks/mail"
-            aria-label="メール共有の設定"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-4 w-4"
-              aria-hidden="true"
-            >
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <path d="m3 8 9 6 9-6" />
-            </svg>
-            メール共有
-          </Link>
+          {/* メール共有は「マスタ管理 ＞ 共有先」に統合したため導線を削除。 */}
           <Link
             href="/office"
             className="inline-flex items-center gap-1.5 rounded-lg border border-[#C0DD97] bg-white px-2.5 py-1 text-sm text-[#3B6D11] transition hover:bg-[#EAF3DE]"
@@ -1574,6 +1629,15 @@ export default function TasksPage() {
           className="rounded-lg bg-[#3B6D11] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2f5a0e]"
         >
           {showForm ? "× 閉じる" : "＋ タスクを追加"}
+        </button>
+        {/* 定型タスク（雛形から親子まとめて登録）。主役は左の「タスクを追加」
+            なので、こちらは白地＋緑枠にして同じ仲間だが従に見えるようにする。 */}
+        <button
+          type="button"
+          onClick={() => setTemplatesOpen(true)}
+          className="rounded-lg border border-[#3B6D11] px-4 py-2 text-sm font-medium text-[#27500A] transition hover:bg-[#EAF3DE]"
+        >
+          ＋ 定型タスクから追加
         </button>
         <button
           type="button"
@@ -1718,7 +1782,7 @@ export default function TasksPage() {
                     is completed from the list/edit, not registered as done. */}
                 {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
                   <option key={s} value={s}>
-                    {STATUS_META[s].label}
+                    {statusMeta[s].label}
                   </option>
                 ))}
               </select>
@@ -1733,7 +1797,7 @@ export default function TasksPage() {
               >
                 {PRIORITY_ORDER.map((p) => (
                   <option key={p} value={p}>
-                    {PRIORITY_META[p].label}
+                    {priorityMeta[p].label}
                   </option>
                 ))}
               </select>
@@ -1751,7 +1815,7 @@ export default function TasksPage() {
                 <option value="">種別なし</option>
                 {TASK_TYPE_ORDER.map((t) => (
                   <option key={t} value={t}>
-                    {TASK_TYPE_META[t].label}
+                    {taskTypeMeta[t].label}
                   </option>
                 ))}
               </select>
@@ -1901,7 +1965,7 @@ export default function TasksPage() {
                 <option value="">状態：すべて</option>
                 {STATUS_ORDER.filter((s) => s !== "done").map((s) => (
                   <option key={s} value={s}>
-                    {STATUS_META[s].label}
+                    {statusMeta[s].label}
                   </option>
                 ))}
               </select>
@@ -1916,7 +1980,7 @@ export default function TasksPage() {
                 <option value="">優先度：すべて</option>
                 {PRIORITY_ORDER.map((p) => (
                   <option key={p} value={p}>
-                    {PRIORITY_META[p].label}
+                    {priorityMeta[p].label}
                   </option>
                 ))}
               </select>
@@ -2170,6 +2234,13 @@ export default function TasksPage() {
           </div>
         </div>
       )}
+      {/* 定型タスク。ツールバーのボタンから開く。生成後は reloadTasks で
+          一覧をその場で読み直す（親子がまとめて増える）。 */}
+      <TemplateModal
+        open={templatesOpen}
+        onClose={() => setTemplatesOpen(false)}
+        onGenerated={reloadTasks}
+      />
     </main>
     </div>
   );

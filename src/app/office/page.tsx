@@ -296,7 +296,11 @@ export default function OfficePage() {
     setSavingName(true);
     setNameError(undefined);
     const uid = session?.user.id;
-    const { error: e1 } = await supabase.auth.updateUser({ data: { name: next } });
+    // name_provisional marks a placeholder an admin filled in. Saving your own
+    // name clears it, so the admin screen stops offering to edit this row.
+    const { error: e1 } = await supabase.auth.updateUser({
+      data: { name: next, name_provisional: false },
+    });
     const { error: e2 } = uid
       ? await supabase.from("profiles").upsert({ id: uid, name: next })
       : { error: null };
@@ -489,7 +493,6 @@ export default function OfficePage() {
           <span title={`天気: ${effectiveWeather}`} className="px-1 text-sm">{weatherIcon}</span>
           <span className="mx-0.5 h-4 w-px bg-black/10" />
           <Link href="/tasks" title="進捗管理" className={navLink}>✅</Link>
-          <Link href="/tasks/mail" title="メール" className={navLink}>✉️</Link>
           <Link href="/forest" title="植林" className={navLink}>🌱</Link>
           <a href="/assistant" target="_blank" rel="noopener noreferrer" title="AI内田さん" className={`${navLink} inline-flex items-center`}>
             <UchidaIcon size={18} label="AI内田さん" />

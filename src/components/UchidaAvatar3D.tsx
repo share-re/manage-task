@@ -22,8 +22,8 @@ type Props = {
 // animation loop needs to move every frame.
 function buildAvatar() {
   const M = {
-    skin: new THREE.MeshStandardMaterial({ name: "skin", color: 0xe8b88f, roughness: 0.9 }),
-    wrinkle: new THREE.MeshStandardMaterial({ name: "wrinkle", color: 0xc99b72, roughness: 0.9 }),
+    skin: new THREE.MeshStandardMaterial({ name: "skin", color: 0xf7d2ae, roughness: 0.9 }),
+    wrinkle: new THREE.MeshStandardMaterial({ name: "wrinkle", color: 0xe0b189, roughness: 0.9 }),
     hair: new THREE.MeshStandardMaterial({ name: "hair", color: 0x9aa3ab, roughness: 0.9 }),
     cardigan: new THREE.MeshStandardMaterial({ name: "cardigan", color: 0x46698a, roughness: 0.9 }),
     shirt: new THREE.MeshStandardMaterial({ name: "shirt", color: 0xffffff, roughness: 0.9 }),

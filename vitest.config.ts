@@ -1,6 +1,17 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // API ルートを直接 import してテストするため、Next と同じ "@/" を解決する。
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // 本物は Client Component から読まれると投げる。テストでは素通りさせる。
+      "server-only": fileURLToPath(
+        new URL("./tests/stubs/server-only.ts", import.meta.url),
+      ),
+    },
+  },
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],

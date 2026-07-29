@@ -1,4 +1,9 @@
 import { requireAdmin } from "@/lib/adminAuth";
+import {
+  denyLastAdminChange,
+  denySelfLockout,
+  isDemotion,
+} from "@/lib/adminGuards";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -81,21 +86,14 @@ export async function PATCH(req: Request) {
   if (!userId)
     return Response.json({ error: "userId が必要です。" }, { status: 400 });
 
-  // You cannot ban, demote or delete yourself: each one locks the door from
-  // the inside, and an admin who did it by accident could not undo it. Another
-  // admin has to make the change. Editing your own display name is still fine.
-  if (userId === g.userId) {
-    if (banned === true)
-      return Response.json(
-        { error: "自分のアカウントは無効化できません。" },
-        { status: 400 },
-      );
-    if (role === "admin" || role === "general")
-      return Response.json(
-        { error: "自分のロールは変更できません。ほかの管理者に依頼してください。" },
-        { status: 400 },
-      );
-  }
+  // 自分自身への降格・無効化は禁止（判断は @/lib/adminGuards）。
+  const selfDenial = denySelfLockout({
+    actorId: g.userId,
+    targetId: userId,
+    role,
+    banned,
+  });
+  if (selfDenial) return Response.json({ error: selfDenial }, { status: 400 });
 
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   if (name !== undefined) {
@@ -110,19 +108,19 @@ export async function PATCH(req: Request) {
 
   const supabaseAdmin = getSupabaseAdmin();
 
-  // F9: never demote/ban the last remaining admin.
-  const isDemote = role === "general" || banned === true;
-  if (isDemote) {
+  // F9: 最後の管理者を降ろさせない。材料（現在の管理者一覧）はここで取り、
+  // 判断は純関数に任せる。
+  if (isDemotion({ role, banned })) {
     const { data } = await supabaseAdmin.auth.admin.listUsers();
-    const admins = data.users.filter(
-      (u) => u.app_metadata?.role === "admin",
-    );
-    const targetIsAdmin = admins.some((u) => u.id === userId);
-    if (targetIsAdmin && admins.length <= 1)
-      return Response.json(
-        { error: "最後の管理者は降格・無効化できません。" },
-        { status: 400 },
-      );
+    const adminIds = data.users
+      .filter((u) => u.app_metadata?.role === "admin")
+      .map((u) => u.id);
+    const denial = denyLastAdminChange({
+      targetId: userId,
+      adminIds,
+      action: "demote",
+    });
+    if (denial) return Response.json({ error: denial }, { status: 400 });
   }
 
   // An admin may only fill in a missing name, or correct a placeholder they
@@ -216,12 +214,15 @@ export async function DELETE(req: Request) {
   // Same guard as PATCH: the team must never lose its last admin.
   if (target.user.app_metadata?.role === "admin") {
     const { data } = await supabaseAdmin.auth.admin.listUsers();
-    const admins = data.users.filter((u) => u.app_metadata?.role === "admin");
-    if (admins.length <= 1)
-      return Response.json(
-        { error: "最後の管理者は削除できません。" },
-        { status: 400 },
-      );
+    const adminIds = data.users
+      .filter((u) => u.app_metadata?.role === "admin")
+      .map((u) => u.id);
+    const denial = denyLastAdminChange({
+      targetId: userId,
+      adminIds,
+      action: "delete",
+    });
+    if (denial) return Response.json({ error: denial }, { status: 400 });
   }
 
   const { data: prof } = await supabaseAdmin

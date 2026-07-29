@@ -37,6 +37,8 @@ export default function TemplateModal({
   onGenerated?: () => void;
 }) {
   const [templates, setTemplates] = useState<TaskTemplate[]>(DEFAULT_TEMPLATES);
+  // DB から読めたか。false のあいだは既定を出しているので「0件」とは言えない。
+  const [fromDb, setFromDb] = useState(false);
   const [priorityMeta, setPriorityMeta] =
     useState<PriorityMetaMap>(DEFAULT_PRIORITY_META);
   const [taskTypeMeta, setTaskTypeMeta] = useState<TaskTypeMetaMap>(
@@ -53,7 +55,12 @@ export default function TemplateModal({
 
   useEffect(() => {
     if (!open) return;
-    loadTaskTemplates().then(setTemplates).catch(() => {});
+    loadTaskTemplates()
+      .then((r) => {
+        setTemplates(r.templates);
+        setFromDb(r.fromDb);
+      })
+      .catch(() => {});
     loadPriorityMeta().then(setPriorityMeta).catch(() => {});
     loadTaskTypeMeta().then(setTaskTypeMeta).catch(() => {});
   }, [open]);
@@ -118,6 +125,12 @@ export default function TemplateModal({
               {taskTypeMeta[item.taskType].label}
             </span>
           )}
+          {/* 見積は雛形に入っているものだけ出す。空なら何も出さない。 */}
+          {item.estimatedHours != null && (
+            <span className="text-[0.68rem] text-zinc-400">
+              見積 {item.estimatedHours}h
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -161,7 +174,7 @@ export default function TemplateModal({
             </p>
             <p className="mt-1.5 text-sm text-zinc-600">
               子タスク {done.count} 件と一緒にタスク一覧へ追加されました。
-              担当者・期限・見積は空のままなので、一覧から入力してください。
+              担当者・期限は空のままなので、一覧から入力してください。
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button
@@ -228,7 +241,7 @@ export default function TemplateModal({
                 <b className="text-zinc-700">
                   {priorityMeta[picked.priority].label}
                 </b>
-                で作られます。担当者・期限・見積は空です。
+                で作られます。担当者・期限は空です。見積は雛形に入っているものだけ入ります。
               </p>
             </div>
 
@@ -259,6 +272,13 @@ export default function TemplateModal({
         ) : (
           /* ---------- step 1: pick ---------- */
           <div className="flex flex-col gap-3">
+            {/* 0件は「まだ作っていない」状態。既定に戻して見せない（管理画面で
+                全部消したのに3件出てくる、という食い違いを避ける）。 */}
+            {fromDb && templates.length === 0 && (
+              <p className="rounded-xl bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-500">
+                使える雛形がありません。管理者が「マスタ管理 ＞ 定型タスク」で登録すると、ここに出ます。
+              </p>
+            )}
             {templates.map((t) => (
               <div
                 key={t.code}
@@ -292,7 +312,7 @@ export default function TemplateModal({
             ))}
             <p className="text-[0.7rem] leading-relaxed text-zinc-400">
               雛形の中身は管理画面（マスタ管理 ＞ 定型タスク）で決めます。
-              担当者・期限・見積は雛形に持たせていないので、生成後に一覧から入力してください。
+              担当者・期限は雛形に持たせていないので、生成後に一覧から入力してください。
             </p>
           </div>
         )}

@@ -33,6 +33,7 @@ function mk(p: Partial<Task> & { id: string }): Task {
     created_by: null,
     created_at: "",
     completed_at: null,
+    quality_checked_at: null,
     ...p,
   };
 }

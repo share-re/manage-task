@@ -41,6 +41,17 @@ import {
 } from "@/lib/taskNotes";
 import { isAdmin } from "@/lib/roles";
 import NotePanel from "@/components/NotePanel";
+import FindingPanel from "@/components/FindingPanel";
+import {
+  addTaskFinding,
+  listTaskFindings,
+  openFindingCountByTask,
+  setFindingResolved,
+  setQualityChecked,
+  softDeleteTaskFinding,
+  type FindingPhase,
+  type TaskFinding,
+} from "@/lib/taskFindings";
 import { listMembers, memberLabel, type Member } from "@/lib/members";
 import SkyHero from "@/components/SkyHero";
 import ForestBackground from "@/components/ForestBackground";
@@ -120,6 +131,11 @@ function getTodayIso(): string {
 function getEmptyString(): string {
   return "";
 }
+// 品質タブなどから /tasks?task=<id> で飛んできたときの対象タスク。
+// 別ページからの遷移で毎回マウントし直されるので、購読は不要（effect も使わない）。
+function getFocusTaskId(): string {
+  return new URLSearchParams(window.location.search).get("task") ?? "";
+}
 
 // A single task row. Shows the task, an inline status select, and a toggleable
 // 懸念メモ panel (replaces the old comment thread).
@@ -137,6 +153,15 @@ function TaskRow({
   onAddNote,
   onSetNoteResolved,
   onDeleteNote,
+  findings,
+  openFindingCount,
+  findingsFailed,
+  findingsExpanded,
+  onToggleFindings,
+  onAddFinding,
+  onSetFindingResolved,
+  onDeleteFinding,
+  onSetQualityChecked,
   onDelete,
   members,
   labelById,
@@ -144,6 +169,7 @@ function TaskRow({
   canModerate,
   onSave,
   childActualHours = 0,
+  highlight = false,
 }: {
   task: Task;
   notes: TaskNote[];
@@ -160,6 +186,22 @@ function TaskRow({
   onAddNote: (taskId: string, body: string) => Promise<void>;
   onSetNoteResolved: (noteId: string, resolved: boolean) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
+  /** 品質（不具合・指摘）。取り消し済みを除いた表示用の記録。 */
+  findings: TaskFinding[];
+  /** 未対応の記録数。親が openFindingCountByTask で1回だけ集計した結果。 */
+  openFindingCount: number;
+  /** 読み込めなかったとき: 「不具合なし」と区別して控えめな「－」を出す。 */
+  findingsFailed: boolean;
+  findingsExpanded: boolean;
+  onToggleFindings: (id: string) => void;
+  onAddFinding: (
+    taskId: string,
+    phase: FindingPhase,
+    body: string,
+  ) => Promise<void>;
+  onSetFindingResolved: (findingId: string, resolved: boolean) => Promise<void>;
+  onDeleteFinding: (findingId: string) => Promise<void>;
+  onSetQualityChecked: (taskId: string, checked: boolean) => Promise<void>;
   onDelete: (task: Task) => void;
   members: Member[];
   labelById: Map<string, string>;
@@ -167,6 +209,8 @@ function TaskRow({
   canModerate: boolean;
   onSave: (id: string, edit: TaskEdit) => Promise<void>;
   childActualHours?: number;
+  /** 品質タブなどから飛んできた対象。見つけやすいよう枠を強調する。 */
+  highlight?: boolean;
 }) {
 
   // Inline edit form state. Opened by the pencil button; seeded from the task.
@@ -251,9 +295,12 @@ function TaskRow({
 
   return (
     <div
-      className={`rounded-lg border-l-4 shadow-sm ring-1 ring-black/5 ${
-        isChild ? "bg-zinc-50" : "bg-white"
-      }`}
+      id={`task-${task.id}`}
+      className={`rounded-lg border-l-4 shadow-sm ${
+        highlight
+          ? "ring-2 ring-[#639922]"
+          : "ring-1 ring-black/5"
+      } ${isChild ? "bg-zinc-50" : "bg-white"}`}
       style={{ borderLeftColor: STATUS_META[task.status].barColor }}
     >
       <div className="flex items-center justify-between gap-3 px-4 py-3">
@@ -354,6 +401,37 @@ function TaskRow({
                 : notes.length > 0
                   ? "✓ 対応済"
                   : "＋メモ"}
+          </button>
+          {/* 品質（不具合・指摘）: 懸念メモとは別ボタン。未対応>0→赤「不具合 n」／
+              記録ありで全対応済→緑「✓ 対応済」／記録なし→「＋品質」。
+              読み込み失敗時は「不具合ゼロ」に見せず控えめな「－」にする。 */}
+          <button
+            type="button"
+            onClick={() => onToggleFindings(task.id)}
+            aria-expanded={findingsExpanded}
+            aria-label={
+              findingsFailed
+                ? "品質（読み込めませんでした）"
+                : "品質（不具合・指摘）"
+            }
+            title={findingsFailed ? "品質の記録を読み込めませんでした" : undefined}
+            className={`rounded-full px-2 py-1 text-xs font-medium ${
+              findingsFailed
+                ? "border border-zinc-200 text-zinc-300"
+                : openFindingCount > 0
+                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                  : findings.length > 0
+                    ? "bg-[#EAF3DE] text-[#27500A] hover:bg-[#dcecc9]"
+                    : "border border-dashed border-zinc-300 text-zinc-400 hover:bg-zinc-50"
+            }`}
+          >
+            {findingsFailed
+              ? "－"
+              : openFindingCount > 0
+                ? `不具合 ${openFindingCount}`
+                : findings.length > 0
+                  ? "✓ 対応済"
+                  : "＋品質"}
           </button>
           <select
             value={task.status}
@@ -559,6 +637,25 @@ function TaskRow({
           />
         </div>
       )}
+
+      {findingsExpanded && (
+        <div className="border-t border-zinc-100 px-4 py-3">
+          <p className="mb-2 text-xs font-medium text-zinc-500">
+            品質（テスト以降に見つかった不具合・指摘）
+          </p>
+          <FindingPanel
+            findings={findings}
+            qualityCheckedAt={task.quality_checked_at}
+            labelById={labelById}
+            currentUserId={currentUserId}
+            canModerate={canModerate}
+            onAdd={(phase, body) => onAddFinding(task.id, phase, body)}
+            onSetResolved={onSetFindingResolved}
+            onDelete={onDeleteFinding}
+            onSetChecked={(checked) => onSetQualityChecked(task.id, checked)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -652,6 +749,21 @@ export default function TasksPage() {
     () => openNoteCountByTask(Object.values(notesByTask).flat()),
     [notesByTask],
   );
+  // 品質（不具合・指摘）。メモと同じく、タスク読み込み後にまとめて取得する。
+  const [findingsByTask, setFindingsByTask] = useState<
+    Record<string, TaskFinding[]>
+  >({});
+  // 取得に失敗したかどうか。失敗を「不具合ゼロ」と同じ見た目にしないために持つ。
+  const [findingsFailed, setFindingsFailed] = useState(false);
+  // 未対応の記録数（行のバッジ）。行ごとに全件を走査しないよう1回だけ集計する。
+  const openFindingCountByTaskMap = useMemo(
+    () => openFindingCountByTask(Object.values(findingsByTask).flat()),
+    [findingsByTask],
+  );
+  const [findingsExpanded, setFindingsExpanded] = useState<Set<string>>(
+    new Set(),
+  );
+
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Registered users for the assignee picker (from the profiles table).
   const [members, setMembers] = useState<Member[]>([]);
@@ -690,7 +802,11 @@ export default function TasksPage() {
   const [search, setSearch] = useState("");
 
   // Which tab is shown: incomplete tasks vs. the completed archive.
-  const [tab, setTab] = useState<"open" | "archive">("open");
+  // 明示的にタブを押したらその値。押していなければ、?task= の対象が完了済みかで決める
+  // （effect 内で setState せずにタブを合わせるため、状態ではなく導出にしている）。
+  const [tabOverride, setTabOverride] = useState<"open" | "archive" | null>(
+    null,
+  );
   // Toggles the centered "変更を保存しました" dialog after an edit is saved.
   const [savedModal, setSavedModal] = useState(false);
   // The task pending deletion (opens a centered confirm dialog); null = closed.
@@ -761,6 +877,30 @@ export default function TasksPage() {
       alive = false;
     };
   }, [taskIdsKey, notesReloadKey]);
+
+  // 品質の記録も同じ形で取得する（表示用なので取り消し済みは除く）。
+  const [findingsReloadKey, setFindingsReloadKey] = useState(0);
+  useEffect(() => {
+    const ids = taskIdsKey ? taskIdsKey.split(",") : [];
+    if (ids.length === 0) return;
+    let alive = true;
+    listTaskFindings(ids)
+      .then((all) => {
+        if (!alive) return;
+        const map: Record<string, TaskFinding[]> = {};
+        for (const f of all) (map[f.task_id] ??= []).push(f);
+        setFindingsByTask(map);
+        setFindingsFailed(false);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        console.error("品質の記録の読み込みに失敗:", err);
+        setFindingsFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [taskIdsKey, findingsReloadKey]);
 
   // Auto-dismiss the save confirmation dialog after a short moment.
   useEffect(() => {
@@ -1038,6 +1178,69 @@ export default function TasksPage() {
     });
   }
 
+  function toggleFindings(id: string) {
+    setFindingsExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** 記録を追加。失敗は FindingPanel 側で表示するので throw する。 */
+  async function handleAddFinding(
+    taskId: string,
+    phase: FindingPhase,
+    body: string,
+  ) {
+    const created = await addTaskFinding(
+      taskId,
+      phase,
+      body,
+      session?.user?.id ?? null,
+    );
+    setFindingsByTask((prev) => ({
+      ...prev,
+      [taskId]: [...(prev[taskId] ?? []), created],
+    }));
+  }
+
+  /** 対応済み↔未対応。resolved_by/at はDBトリガーが刻むので再取得する。 */
+  async function handleSetFindingResolved(
+    findingId: string,
+    resolved: boolean,
+  ) {
+    await setFindingResolved(findingId, resolved);
+    setFindingsReloadKey((k) => k + 1);
+  }
+
+  /** 取り消し（ソフト削除・権限チェックはDB関数側）。表示から取り除く。 */
+  async function handleDeleteFinding(findingId: string) {
+    await softDeleteTaskFinding(findingId);
+    setFindingsByTask((prev) => {
+      const next: Record<string, TaskFinding[]> = {};
+      for (const [taskId, list] of Object.entries(prev)) {
+        next[taskId] = list.filter((f) => f.id !== findingId);
+      }
+      return next;
+    });
+  }
+
+  /** 「テスト実施済み」の切替。0件と未確認を区別するためタスク側に持つ。 */
+  async function handleSetQualityChecked(taskId: string, checked: boolean) {
+    await setQualityChecked(taskId, checked);
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              quality_checked_at: checked ? new Date().toISOString() : null,
+            }
+          : t,
+      ),
+    );
+  }
+
   function toggleArchive(id: string) {
     setExpandedArchive((prev) => {
       const next = new Set(prev);
@@ -1184,6 +1387,26 @@ export default function TasksPage() {
   // ignored here — filtering to "done" would always read 100%.)
   // Progress is counted over LEAF tasks (child + standalone tasks), excluding
   // parents that only group children — see leafTasks() for why.
+  // 品質タブなどから ?task=<id> で飛んできた対象。行を強調してそこまでスクロールする。
+  const focusTaskId = useSyncExternalStore(
+    subscribeNever,
+    getFocusTaskId,
+    getEmptyString,
+  );
+  const focusTask = focusTaskId
+    ? tasks.find((t) => t.id === focusTaskId)
+    : undefined;
+  // 明示操作が優先。無ければ、対象が完了済みならアーカイブ側を開く。
+  const tab: "open" | "archive" =
+    tabOverride ?? (focusTask?.status === "done" ? "archive" : "open");
+
+  // 対象の行までスクロールする（setState はしないので effect で問題ない）。
+  useEffect(() => {
+    if (!focusTaskId || !focusTask) return;
+    const el = document.getElementById(`task-${focusTaskId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusTaskId, focusTask]);
+
   const leaves = useMemo(() => leafTasks(tasks), [tasks]);
   const progressScope = filterAssigneeId
     ? leaves.filter((t) => t.assignee_id === filterAssigneeId)
@@ -1208,6 +1431,7 @@ export default function TasksPage() {
   ) => (
     <TaskRow
       task={task}
+      highlight={task.id === focusTaskId}
       notes={notesByTask[task.id] ?? []}
       openCount={openCountByTask.get(task.id) ?? 0}
       notesFailed={notesFailed}
@@ -1220,6 +1444,15 @@ export default function TasksPage() {
       }
       onChangeStatus={handleStatusChange}
       onToggleNotes={toggleNotes}
+      findings={findingsByTask[task.id] ?? []}
+      openFindingCount={openFindingCountByTaskMap.get(task.id) ?? 0}
+      findingsFailed={findingsFailed}
+      findingsExpanded={findingsExpanded.has(task.id)}
+      onToggleFindings={toggleFindings}
+      onAddFinding={handleAddFinding}
+      onSetFindingResolved={handleSetFindingResolved}
+      onDeleteFinding={handleDeleteFinding}
+      onSetQualityChecked={handleSetQualityChecked}
       onAddNote={handleAddNote}
       onSetNoteResolved={handleSetNoteResolved}
       onDeleteNote={handleDeleteNote}
@@ -1595,7 +1828,7 @@ export default function TasksPage() {
               <button
                 key={key}
                 type="button"
-                onClick={() => setTab(key)}
+                onClick={() => setTabOverride(key)}
                 className={`flex items-center gap-1.5 border-b-2 px-3 pb-2 pt-1 text-sm transition ${
                   tab === key
                     ? "border-zinc-900 font-semibold text-zinc-900"

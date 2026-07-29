@@ -76,6 +76,8 @@ export type Task = {
   created_by: string | null;
   created_at: string;
   completed_at: string | null;
+  /** 品質チェック実施済みの日時。null＝未確認（0件と区別する）… 品質_実装手順書 */
+  quality_checked_at: string | null;
 };
 
 // Presentation metadata for each status, kept together so the label, the
@@ -142,7 +144,7 @@ const DIFFICULTY_XLARGE_MIN_HOURS = 16;
 // Columns fetched from the DB. Listing them explicitly (instead of "*") means
 // the client-side Task type and the query never silently diverge.
 const TASK_COLUMNS =
-  "id, title, assignee, assignee_id, due_date, status, priority, task_type, estimated_hours, actual_hours, start_date, baseline_start, baseline_due, project_id, parent_id, created_by, created_at, completed_at";
+  "id, title, assignee, assignee_id, due_date, status, priority, task_type, estimated_hours, actual_hours, start_date, baseline_start, baseline_due, project_id, parent_id, created_by, created_at, completed_at, quality_checked_at";
 
 // Coerce a DB numeric (may arrive as number or string) into number | null.
 function toNumberOrNull(value: unknown): number | null {
@@ -179,6 +181,8 @@ function normalizeTask(row: Record<string, unknown>): Task {
     created_at: typeof row.created_at === "string" ? row.created_at : "",
     completed_at:
       typeof row.completed_at === "string" ? row.completed_at : null,
+    quality_checked_at:
+      typeof row.quality_checked_at === "string" ? row.quality_checked_at : null,
   };
 }
 

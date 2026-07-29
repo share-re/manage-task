@@ -31,7 +31,16 @@ const AuthContext = createContext<AuthState>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profileName, setProfileName] = useState<string | null>(null);
+  // Keep the fetched name together with the user it belongs to. Deriving the
+  // exposed value from that pair means a re-login can't briefly show the
+  // previous user's name, and we never have to clear state inside an effect.
+  const [profile, setProfile] = useState<{
+    uid: string;
+    name: string | null;
+  } | null>(null);
+
+  const uid = session?.user?.id ?? null;
+  const profileName = profile && profile.uid === uid ? profile.name : null;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -44,28 +53,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const loadProfileName = useCallback(async (uid: string) => {
-    const { data } = await supabase
+  // Bumped by refreshProfileName() to re-run the fetch below (e.g. right after
+  // the user edits their display name).
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (!uid) return;
+    let alive = true;
+    supabase
       .from("profiles")
       .select("name")
       .eq("id", uid)
-      .single();
-    setProfileName((data?.name as string | null) ?? null);
-  }, []);
-
-  useEffect(() => {
-    const uid = session?.user?.id;
-    if (!uid) {
-      setProfileName(null);
-      return;
-    }
-    loadProfileName(uid);
-  }, [session?.user?.id, loadProfileName]);
+      .single()
+      .then(({ data }) => {
+        // Ignore a response that arrived after the user changed.
+        if (alive) {
+          setProfile({ uid, name: (data?.name as string | null) ?? null });
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [uid, reloadKey]);
 
   const refreshProfileName = useCallback(() => {
-    const uid = session?.user?.id;
-    if (uid) loadProfileName(uid);
-  }, [session?.user?.id, loadProfileName]);
+    setReloadKey((k) => k + 1);
+  }, []);
 
   return (
     <AuthContext.Provider

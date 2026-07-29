@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import {
   buildTaskTree,
@@ -107,6 +107,19 @@ function filterBySearch(pool: Task[], query: string): Task[] {
 }
 
 type SortKey = "default" | "due" | "assignee" | "status" | "priority";
+
+// useSyncExternalStore 用のヘルパー（「今日」はセッション中変わらないので購読は不要）。
+// 同じ文字列を返す限り再描画されない。
+function subscribeNever(): () => void {
+  return () => {};
+}
+function getTodayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+function getEmptyString(): string {
+  return "";
+}
 
 // A single task row. Shows the task, an inline status select, and a toggleable
 // 懸念メモ panel (replaces the old comment thread).
@@ -692,16 +705,16 @@ export default function TasksPage() {
     new Set(),
   );
 
-  // Today's date (YYYY-MM-DD, local) — the earliest allowed due date. Set in an
-  // effect to avoid a server/client hydration mismatch.
-  const [minDate, setMinDate] = useState("");
+  // Today's date (YYYY-MM-DD, local) — the earliest allowed due date.
+  // サーバでは空文字、クライアントでは実際の日付を返すことで、hydration の
+  // ズレを避けつつ effect 内で setState しないで済ませる。
+  const minDate = useSyncExternalStore(
+    subscribeNever,
+    getTodayIso,
+    getEmptyString,
+  );
 
   useEffect(() => {
-    const now = new Date();
-    setMinDate(
-      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
-    );
-
     listTasks()
       .then(setTasks)
       .catch((err) => {

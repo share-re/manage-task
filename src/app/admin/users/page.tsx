@@ -28,27 +28,48 @@ export default function AdminUsersPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!token) return;
+  // 取得だけを行う（state は触らない）。state 更新と分けておくと、effect からは
+  // 「呼ぶ → .then で setState」の形にでき、effect 内の同期 setState を避けられる。
+  const fetchUsers = useCallback(async (): Promise<ManagedUser[]> => {
+    if (!token) return [];
+    const res = await fetch("/api/admin/users", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? "取得に失敗しました。");
+    return json.users as ManagedUser[];
+  }, [token]);
+
+  /** 明示的な再読込（操作後など）。読み込み中表示を出し、前のエラーも消す。 */
+  const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/users", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "取得に失敗しました。");
-      setUsers(json.users as ManagedUser[]);
+      setUsers(await fetchUsers());
     } catch (e) {
       setError(errMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [fetchUsers]);
 
+  // 初回読み込み。setState はすべて then/catch/finally の中で行う。
   useEffect(() => {
-    load();
-  }, [load]);
+    let alive = true;
+    fetchUsers()
+      .then((list) => {
+        if (alive) setUsers(list);
+      })
+      .catch((e) => {
+        if (alive) setError(errMessage(e));
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fetchUsers]);
 
   const adminCount = users.filter((u) => u.role === "admin").length;
 
@@ -68,7 +89,7 @@ export default function AdminUsersPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "更新に失敗しました。");
-      await load();
+      await reload();
     } catch (e) {
       setError(errMessage(e));
     } finally {
@@ -95,7 +116,7 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error(json.error ?? "招待に失敗しました。");
       setNotice(`${inviteEmail} に招待メールを送信しました。`);
       setInviteEmail("");
-      await load();
+      await reload();
     } catch (e) {
       setError(errMessage(e));
     } finally {

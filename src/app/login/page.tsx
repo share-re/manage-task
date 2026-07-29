@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabase";
 import { describePasskeyError, isPasskeySupported } from "@/lib/passkey";
+
+// Passkey support can't change while the page is open, so there is nothing to
+// subscribe to. The server has no WebAuthn API, so it renders "unsupported".
+const subscribeNever = () => () => {};
+const getPasskeyServerSnapshot = () => false;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,12 +18,14 @@ export default function LoginPage() {
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [pkLoading, setPkLoading] = useState(false);
-  // Checked in an effect (not during render) to avoid an SSR/hydration mismatch.
-  const [passkeySupported, setPasskeySupported] = useState(false);
-
-  useEffect(() => {
-    setPasskeySupported(isPasskeySupported());
-  }, []);
+  // Browser-only capability: read it through useSyncExternalStore so the server
+  // renders "unsupported" and the client swaps in the real value without an
+  // effect (and without an SSR/hydration mismatch).
+  const passkeySupported = useSyncExternalStore(
+    subscribeNever,
+    isPasskeySupported,
+    getPasskeyServerSnapshot,
+  );
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

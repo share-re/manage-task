@@ -22,8 +22,8 @@ type Props = {
 // animation loop needs to move every frame.
 function buildAvatar() {
   const M = {
-    skin: new THREE.MeshStandardMaterial({ name: "skin", color: 0xe8b88f, roughness: 0.9 }),
-    wrinkle: new THREE.MeshStandardMaterial({ name: "wrinkle", color: 0xc99b72, roughness: 0.9 }),
+    skin: new THREE.MeshStandardMaterial({ name: "skin", color: 0xf7d2ae, roughness: 0.9 }),
+    wrinkle: new THREE.MeshStandardMaterial({ name: "wrinkle", color: 0xe0b189, roughness: 0.9 }),
     hair: new THREE.MeshStandardMaterial({ name: "hair", color: 0x9aa3ab, roughness: 0.9 }),
     cardigan: new THREE.MeshStandardMaterial({ name: "cardigan", color: 0x46698a, roughness: 0.9 }),
     shirt: new THREE.MeshStandardMaterial({ name: "shirt", color: 0xffffff, roughness: 0.9 }),
@@ -287,11 +287,31 @@ export default function UchidaAvatar3D({ size = 240, talking = false, className 
     ro.observe(host);
     resize();
 
-    // ---- animation: idle bob + wave + blink + talk (numbers from reference) ----
+    // ---- animation: idle bob + gestures + blink + talk (numbers from reference) ----
     const clock = new THREE.Clock();
     let nextBlink = 2;
     let blinkT = -1;
     let raf = 0;
+
+    // 待機モーション3種。スケジューラがランダムに1つ選び、終了後 5 秒あけて次を選ぶ。
+    const GESTURES = [
+      { name: "wave", dur: 2.4 },
+      { name: "think", dur: 3.6 },
+      { name: "nod", dur: 2.2 },
+    ] as const;
+    type Gesture = (typeof GESTURES)[number];
+
+    let gesture: Gesture | null = null;
+    let gestureT = 0;
+    let nextGesture = 5;
+
+    const REST = { rz: 0.32, rx: 0 };
+    // 立ち上がり(0.45)と収束(0.25)を掛け合わせたイージング。0→1→0 の山になる。
+    const ease = (p: number) => Math.min(1, p / 0.45) * Math.min(1, (1 - p) / 0.25 + 0.001);
+    // 現在値を target へ毎フレーム k の割合で近づける（腕を rest へ戻すのに使う）
+    const approach = (rot: THREE.Euler, key: "x" | "z", target: number, k = 0.12) => {
+      rot[key] += (target - rot[key]) * k;
+    };
 
     const animate = () => {
       raf = requestAnimationFrame(animate);
@@ -303,26 +323,56 @@ export default function UchidaAvatar3D({ size = 240, talking = false, className 
       body.rotation.z = Math.sin(t * 0.9) * 0.015;
       head.rotation.z = Math.sin(t * 1.1 + 0.6) * 0.04;
       head.rotation.y = Math.sin(t * 0.55) * 0.1;
-      // wave: first 2.2s of every 6s cycle, right arm up with easing
-      const cycle = t % 6;
-      if (cycle < 2.2) {
-        const k = Math.min(1, cycle / 0.4) * Math.min(1, (2.2 - cycle) / 0.4);
-        arms.R.rotation.z = 0.32 + k * (2.2 + Math.sin(t * 9) * 0.22 - 0.32);
-      } else {
-        arms.R.rotation.z += (0.32 - arms.R.rotation.z) * 0.15;
+
+      // ---- gestures ----
+      // 会話中は新しいモーションを開始しない（再生中のものは最後まで続ける）
+      if (!gesture && t > nextGesture && !isTalking) {
+        gesture = GESTURES[Math.floor(Math.random() * GESTURES.length)];
+        gestureT = t;
+      }
+      let nodOffset = 0;
+      let tiltOffset = 0;
+      if (gesture) {
+        const p = (t - gestureT) / gesture.dur;
+        if (p >= 1) {
+          gesture = null;
+          nextGesture = t + 5;
+        } else {
+          const k = Math.max(0, Math.min(1, ease(p)));
+          if (gesture.name === "wave") {
+            arms.R.rotation.z = REST.rz + k * (2.2 + Math.sin(t * 9) * 0.22 - REST.rz);
+            arms.R.rotation.x = 0;
+          } else if (gesture.name === "think") {
+            // 右手をあごに当てて考え込む
+            arms.R.rotation.z = REST.rz + k * (-0.3 - REST.rz);
+            arms.R.rotation.x = k * -2.15;
+            tiltOffset = k * 0.1;
+            nodOffset = k * 0.06;
+          } else if (gesture.name === "nod") {
+            // 相槌：2回うなずく
+            nodOffset = k * Math.sin(p * Math.PI * 4) * 0.16;
+          }
+        }
+      }
+      // nod は腕を使わないので、非再生時と同じく rest へ戻し続ける
+      if (!gesture || gesture.name === "nod") {
+        approach(arms.R.rotation, "z", REST.rz, 0.15);
+        approach(arms.R.rotation, "x", REST.rx, 0.15);
       }
       arms.L.rotation.z = -0.32 + Math.sin(t * 2.2) * 0.03;
+      head.rotation.z += tiltOffset;
+
       // talk: swap closed/open mouth on a two-sine gate
       if (isTalking) {
         const open = (Math.sin(t * 14) + Math.sin(t * 9.3)) * 0.5 > 0;
         mouthOpen.visible = open;
         mouth.visible = !open;
         mouthOpen.scale.y = 0.7 + Math.abs(Math.sin(t * 14)) * 0.5;
-        head.rotation.x = Math.sin(t * 6) * 0.03;
+        head.rotation.x = Math.sin(t * 6) * 0.03 + nodOffset;
       } else {
         mouthOpen.visible = false;
         mouth.visible = true;
-        head.rotation.x *= 0.9;
+        head.rotation.x = head.rotation.x * 0.8 + nodOffset;
       }
       // blink: quick close/open every 1.8–4.3s
       if (blinkT < 0 && t > nextBlink) blinkT = t;
@@ -345,16 +395,19 @@ export default function UchidaAvatar3D({ size = 240, talking = false, className 
     const applyMotionPreference = () => {
       cancelAnimationFrame(raf);
       if (media.matches) {
+        gesture = null;
         body.rotation.set(0.06, 0, 0);
         body.position.y = 0;
         head.rotation.set(0, 0, 0);
         arms.L.rotation.z = -0.32;
-        arms.R.rotation.z = 0.32;
+        arms.R.rotation.set(0, 0, 0.32);
         eyeL.scale.y = eyeR.scale.y = 1;
         mouth.visible = true;
         mouthOpen.visible = false;
         renderer.render(scene, camera);
       } else {
+        // 静止中も clock は進むため、復帰直後に即モーションが始まらないよう置き直す
+        nextGesture = clock.getElapsedTime() + 5;
         animate();
       }
     };

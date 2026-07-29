@@ -1244,7 +1244,8 @@ export default function TasksPage() {
     <div className="relative flex-1" style={{ colorScheme: "light" }}>
       {/* 植林（/forest）トーンの背景。AI内田さん（/assistant）と共通のコンポーネント。 */}
       <ForestBackground />
-      <main className="mx-auto w-full max-w-2xl px-4 py-8">
+      {/* 進捗バーとタスク一覧が窮屈だったので、ダッシュボードと同じ幅に広げる。 */}
+      <main className="mx-auto w-full max-w-4xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">進捗管理</h1>
         <div className="flex items-center gap-2">

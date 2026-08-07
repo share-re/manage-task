@@ -292,6 +292,68 @@ export function taskProgress(tasks: Task[]): {
  * auto-archive rule), so counting parents would double-count the same work and
  * inflate progress. Counting leaves reflects the real, hands-on work done.
  */
+// --- まとめて登録の行解析 ---
+
+/** まとめて登録のテキスト1行ぶん。key は行ごとの期間を覚えておくための識別子。 */
+export type BulkRow = {
+  /** 「何番目の親の、何番目の子か」。行を編集しても同じ行なら同じキーになる。 */
+  key: string;
+  title: string;
+  isChild: boolean;
+};
+
+/**
+ * まとめて登録のテキストを親子の並びに読み替える。
+ *
+ * 規則は登録処理と同じ: 空行は無視し、行頭が空白（半角/タブ/全角）なら直前の
+ * 非インデント行の子になる。先頭がいきなりインデントされている場合は親として扱う
+ * （親がまだ無いため）。
+ *
+ * 画面（行ごとの期間の入力欄）と保存処理の両方がこの関数を使う。別々に書くと
+ * 「画面で設定した期間が、保存時に別の行に付く」というずれが起きるため。
+ */
+export function parseBulkRows(text: string): BulkRow[] {
+  const rows: BulkRow[] = [];
+  let parentIdx = -1;
+  let childIdx = 0;
+  for (const raw of text.split("\n")) {
+    if (!raw.trim()) continue;
+    const isChild = /^[ \t　]/.test(raw) && parentIdx >= 0;
+    if (isChild) {
+      childIdx += 1;
+      rows.push({
+        key: `${parentIdx}-${childIdx}`,
+        title: raw.trim(),
+        isChild: true,
+      });
+    } else {
+      parentIdx += 1;
+      childIdx = 0;
+      rows.push({ key: `${parentIdx}`, title: raw.trim(), isChild: false });
+    }
+  }
+  return rows;
+}
+
+/** 行ごとに設定された期間。未設定の行は共通の期間を使う。 */
+export type BulkRange = { start: string; due: string };
+
+/**
+ * その行に使う期間を決める。個別設定があればそれを、無ければ共通の値を返す。
+ * 個別設定のうち片方だけ入力されている場合、空いている方は共通で埋める
+ * （開始だけ決まっている、という入力を弾かないため）。
+ */
+export function resolveBulkRange(
+  range: BulkRange | undefined,
+  shared: BulkRange,
+): BulkRange {
+  if (!range) return shared;
+  return {
+    start: range.start || shared.start,
+    due: range.due || shared.due,
+  };
+}
+
 export function leafTasks(tasks: Task[]): Task[] {
   const parentIds = new Set(
     tasks.map((t) => t.parent_id).filter((id): id is string => id !== null),

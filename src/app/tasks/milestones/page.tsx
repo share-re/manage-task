@@ -7,6 +7,10 @@ import {
   createMilestone,
   updateMilestone,
   deleteMilestone,
+  customKindBadge,
+  customKindLabel,
+  usedCustomKinds,
+  CUSTOM_KIND,
   MILESTONE_KIND_META,
   MILESTONE_KIND_ORDER,
   type Milestone,
@@ -43,6 +47,10 @@ export default function MilestonesPage() {
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [kind, setKind] = useState<MilestoneKind>("deadline");
+  /** 自由記述の種別名。空なら標準の3種（kind）を使う。 */
+  const [customKind, setCustomKind] = useState("");
+  /** 「＋ 新しく入力…」を選んだ直後だけ、名前の入力欄を出す。 */
+  const [enteringKind, setEnteringKind] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -58,16 +66,23 @@ export default function MilestonesPage() {
       .catch((err) => console.error("案件の読み込みに失敗:", err));
   }, []);
 
+  // 既に使われている自由記述の種別。実績のある名前だけが候補に並ぶ。
+  const usedKinds = usedCustomKinds(items);
+
   async function onAdd(e: React.FormEvent) {
     e.preventDefault();
     setError(undefined);
     if (!title.trim() || !dueDate) return;
     setSaving(true);
     try {
+      // 自由記述の種別は note に入れる（kind には check 制約があり増やせない）。
+      // 標準の3種を選んだときは note を空にして、従来どおり kind で表示する。
+      const custom = customKind.trim();
       const created = await createMilestone({
         title: title.trim(),
         dueDate,
-        kind,
+        kind: custom ? CUSTOM_KIND : kind,
+        note: custom || null,
         projectId,
       });
       setItems((prev) =>
@@ -153,9 +168,24 @@ export default function MilestonesPage() {
               onChange={(e) => setDueDate(e.target.value)}
               className={`${inputClass} flex-1`}
             />
+            {/* 種別：標準3種＋これまでに使われた自由記述。過去の入力が候補に出るので
+                同じ種別を毎回打ち直さなくてよい。 */}
             <select
-              value={kind}
-              onChange={(e) => setKind(e.target.value as MilestoneKind)}
+              value={customKind ? `c:${customKind}` : enteringKind ? "__new__" : kind}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__new__") {
+                  setCustomKind("");
+                  setEnteringKind(true);
+                } else if (v.startsWith("c:")) {
+                  setCustomKind(v.slice(2));
+                  setEnteringKind(false);
+                } else {
+                  setCustomKind("");
+                  setEnteringKind(false);
+                  setKind(v as MilestoneKind);
+                }
+              }}
               className={`${inputClass} flex-1`}
             >
               {MILESTONE_KIND_ORDER.map((k) => (
@@ -163,7 +193,21 @@ export default function MilestonesPage() {
                   {MILESTONE_KIND_META[k].label}
                 </option>
               ))}
+              {usedKinds.map((label) => (
+                <option key={label} value={`c:${label}`}>
+                  {label}
+                </option>
+              ))}
+              <option value="__new__">＋ 新しく入力…</option>
             </select>
+            {(enteringKind || customKind) && (
+              <input
+                value={customKind}
+                onChange={(e) => setCustomKind(e.target.value)}
+                placeholder="種別名（例：サンプルローカル動作確認）"
+                className={`${inputClass} flex-1`}
+              />
+            )}
             <button
               type="submit"
               disabled={saving}
@@ -192,11 +236,22 @@ export default function MilestonesPage() {
                     i > 0 ? "border-t border-zinc-100" : ""
                   }`}
                 >
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${KIND_BADGE[m.kind]}`}
-                  >
-                    {MILESTONE_KIND_META[m.kind].label}
-                  </span>
+                  {/* 自由記述の種別があればそれを出す。色は名前から機械的に決まるので、
+                      同じ種別名はどの画面でも同じ色になる。 */}
+                  {(() => {
+                    const custom = customKindLabel(m.note);
+                    const label = custom ?? MILESTONE_KIND_META[m.kind].label;
+                    const badge = custom
+                      ? customKindBadge(custom)
+                      : KIND_BADGE[m.kind];
+                    return (
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${badge}`}
+                      >
+                        {label}
+                      </span>
+                    );
+                  })()}
                   <div className="min-w-0 flex-1">
                     <div
                       className={`truncate text-sm font-medium ${

@@ -26,8 +26,10 @@ const MH = 18; // month header row
 const DH = 20; // day-number row
 const FH = 26; // feature (parent) row
 const LH = 30; // leaf (task) row
-const NAMEW = 152;
-const WHOW = 86;
+// 作業名は「単体テスト仕様書レビュー」程度が切れずに入る幅。左4列は横スクロール中も
+// sticky で固定されるので、広げても日付側の操作の邪魔にはならない。
+const NAMEW = 320;
+const WHOW = 100; // 「柴田_1」のような接尾辞つきの名前が入る幅
 const SW = 70;
 const EW = 70;
 const LABEL = NAMEW + WHOW + SW + EW;
@@ -263,7 +265,10 @@ export default function GanttPage() {
   return (
     <div className="relative flex-1">
       <ForestBackground />
-      <main className="mx-auto w-full max-w-5xl px-4 py-8">
+      {/* ガントだけ他のタブ（max-w-4xl）より広い。横に日付が伸びる画面で、
+          作業名と日付を同時に見たいという要望のため。画面いっぱいにはせず
+          左右に余白を残す。 */}
+      <main className="mx-auto w-full max-w-[1400px] px-4 py-8">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-zinc-900">ガントチャート</h1>
           <div className="flex items-center gap-3">
@@ -422,7 +427,11 @@ export default function GanttPage() {
                           borderRight: `1px solid ${GH}`,
                           overflow: "hidden",
                           whiteSpace: "nowrap",
+                          // 入りきらない分は「…」で切る。切っただけだと途中で
+                          // 消えたのか元から短いのか分からないため。全文は title で読める。
+                          textOverflow: "ellipsis",
                         }}
+                        title={r.label}
                       >
                         {r.label}
                       </div>
@@ -453,7 +462,9 @@ export default function GanttPage() {
                           borderRight: `1px solid ${GH}`,
                           overflow: "hidden",
                           whiteSpace: "nowrap",
+                          textOverflow: "ellipsis",
                         }}
+                        title={r.label}
                       >
                         ＋{r.label}
                       </div>

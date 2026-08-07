@@ -86,17 +86,21 @@ export default function TimeEntryPage() {
   }, []);
 
   const workItems = useMemo(() => buildWorkItems(tasks), [tasks]);
+  /** 既定ON。自分の担当＋担当者なしだけに絞る。外すと全員ぶんが出る。 */
+  const [onlyMine, setOnlyMine] = useState(true);
   // プルダウンの選択肢：未完了のリーフのうち「自分の担当」＋「担当なし」。
   // 工数は自分の作業を記録する画面なので他人の担当は出さない（担当なしは
   // このアプリが許容しているので拾う）。
+  // 他人の担当だけを外すと「手伝った作業の工数が入れられない」ため、
+  // 既定は絞ったまま、チェックを外せば全員ぶんを出せるようにしている。
   const selectable = useMemo(
     () =>
-      workItems.filter(
-        (w) =>
-          w.status !== "done" &&
-          (w.assigneeId === memberId || w.assigneeId == null),
-      ),
-    [workItems, memberId],
+      workItems.filter((w) => {
+        if (w.status === "done") return false;
+        if (!onlyMine) return true;
+        return w.assigneeId === memberId || w.assigneeId == null;
+      }),
+    [workItems, memberId, onlyMine],
   );
   const itemById = useMemo(() => {
     const m = new Map<string, (typeof workItems)[number]>();
@@ -324,6 +328,18 @@ export default function TimeEntryPage() {
           </div>
 
           {/* タスク選択（プルダウン）→ 行を追加 */}
+          <label className="mb-2 flex w-fit items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              checked={onlyMine}
+              onChange={(e) => setOnlyMine(e.target.checked)}
+              className="h-4 w-4"
+            />
+            自分の担当だけ表示
+            <span className="text-xs text-zinc-500">
+              （外すと他の人が担当の作業も選べます）
+            </span>
+          </label>
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <select
               value={picked}

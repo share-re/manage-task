@@ -23,6 +23,69 @@ export const MILESTONE_KIND_META: Record<MilestoneKind, { label: string }> = {
 
 export const MILESTONE_KIND_ORDER: MilestoneKind[] = [...MILESTONE_KINDS];
 
+// --- 自由記述の種別（「サンプルローカル動作確認」など） ---
+//
+// DB の kind には check 制約（deadline/review/release）があり、種別を増やすには
+// SQL が要る。Supabase に入れない状況でも運用できるよう、自由記述の種別名は
+// 制約の無い note 列に置き、kind は deadline のままにしておく。
+//
+// note は他の用途で使っていない（列だけあって未使用だった）ので衝突しない。
+// SQL が流せるようになったら、note の値を正式な kind へ昇格させる想定。
+
+/** 自由記述の種別を入れておく kind。表示は note が優先されるので見た目には出ない。 */
+export const CUSTOM_KIND: MilestoneKind = "deadline";
+
+/**
+ * 自由記述の種別名。note が空なら null（＝標準の3種として表示する）。
+ * 前後の空白を落とし、空白だけの note は無いものとして扱う。
+ */
+export function customKindLabel(note: string | null): string | null {
+  const trimmed = (note ?? "").trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
+ * 自由記述の種別に割り当てるバッジ色。
+ *
+ * 標準3種が使う琥珀・青・緑は避ける（標準と自由記述を見分けられなくなるため）。
+ * 色は名前から機械的に決めるので、同じ種別名は誰の画面でも常に同じ色になる。
+ * 色数より種別が増えると色が重複するが、名前を併記しているので混同はしない。
+ */
+export const CUSTOM_KIND_BADGES = [
+  "bg-purple-100 text-purple-700",
+  "bg-teal-100 text-teal-700",
+  "bg-pink-100 text-pink-700",
+  "bg-orange-100 text-orange-800",
+  "bg-indigo-100 text-indigo-700",
+  "bg-cyan-100 text-cyan-800",
+] as const;
+
+export function customKindBadge(label: string): string {
+  // 文字コードの総和で選ぶだけの単純な割り当て。分布の良さより
+  // 「同じ名前なら必ず同じ色」を優先している。
+  let sum = 0;
+  for (let i = 0; i < label.length; i += 1) sum += label.charCodeAt(i);
+  return CUSTOM_KIND_BADGES[sum % CUSTOM_KIND_BADGES.length];
+}
+
+/**
+ * 既に使われている自由記述の種別を、重複を除いて古い順に返す。
+ * 「毎回入力し直す」のを避けるための候補一覧（実績のある名前だけが並ぶ）。
+ */
+export function usedCustomKinds(
+  milestones: Pick<Milestone, "note">[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of milestones) {
+    const label = customKindLabel(m.note);
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    out.push(label);
+  }
+  return out;
+}
+
 export type Milestone = {
   id: string;
   project_id: string | null;

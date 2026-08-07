@@ -16,6 +16,8 @@ import {
   deleteTasks,
   leafTasks,
   listTasks,
+  parseBulkRows,
+  resolveBulkRange,
   resolveAssigneeLabel,
   taskProgress,
   updateTask,
@@ -27,6 +29,8 @@ import {
   DIFFICULTY_META,
   difficultyFromEstimate,
   freezeBaseline,
+  type BulkRange,
+  type BulkRow,
   type Task,
   type TaskEdit,
   type TaskStatus,
@@ -80,6 +84,11 @@ import TemplateModal from "./TemplateModal";
 
 function formatDue(due: string | null): string {
   return due ? due.replaceAll("-", "/") : "期限なし";
+}
+
+/** 「2026-08-01」→「08/01」。行ごとの期間の一覧を1行に収めるための短い形。 */
+function fmtMd(iso: string): string {
+  return iso ? iso.slice(5).replace("-", "/") : "";
 }
 
 // Format hours without a trailing ".0" (4 -> "4", 4.5 -> "4.5").
@@ -361,7 +370,9 @@ function TaskRow({
               </button>
             )}
           </div>
-          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+          {/* 担当者・期間・見積などのメタ行。text-xs / zinc-500 は薄くて読みにくい
+              という指摘を受けて、1段大きく・濃くしている。 */}
+          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-zinc-700">
             {/* マスタの表示名をそのまま出す。「優先」を前に足していたが、
                 表示名を「最優先」に変えると「優先 最優先」になってしまう。
                 名前を決めるのはマスタ側の仕事なので、アプリは足さない。 */}
@@ -377,7 +388,7 @@ function TaskRow({
               (() => {
                 const d = difficultyFromEstimate(task.estimated_hours);
                 return d ? (
-                  <span className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-500">
+                  <span className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-700">
                     見積 {formatHours(task.estimated_hours)}h・
                     {DIFFICULTY_META[d].label}
                   </span>
@@ -824,6 +835,10 @@ export default function TasksPage() {
   const [bulkMode, setBulkMode] = useState(false);
   const [title, setTitle] = useState("");
   const [bulkText, setBulkText] = useState("");
+  // まとめて登録の「行ごとの期間」。キーは parseBulkRows の key。
+  // 未設定の行は下の共通の開始日・期限を使う。
+  const [bulkRanges, setBulkRanges] = useState<Record<string, BulkRange>>({});
+  const [openBulkRow, setOpenBulkRow] = useState<string | null>(null);
   const [assigneeId, setAssigneeId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -1000,30 +1015,42 @@ export default function TasksPage() {
       setError("開始日は期限より前にしてください。");
       return;
     }
+    // 行ごとに期間を変えられるので、共通と同じ検査を各行にもかける。
+    // ここで弾かないと、逆転した期間のタスクが混ざったまま登録されてしまう。
+    if (bulkMode) {
+      const shared: BulkRange = { start: startDate, due: dueDate };
+      for (const row of parseBulkRows(bulkText)) {
+        const r = resolveBulkRange(bulkRanges[row.key], shared);
+        if (r.start && r.due && r.start > r.due) {
+          setError(`「${row.title}」の開始日は期限より前にしてください。`);
+          return;
+        }
+      }
+    }
     setSaving(true);
     try {
       if (bulkMode) {
         // Indented lines (leading space/tab/full-width space) become children of
         // the preceding non-indented line, so a parent and its children can be
         // registered together. Parents are created first to obtain their ids.
-        const groups: { title: string; children: string[] }[] = [];
-        for (const raw of bulkText.split("\n")) {
-          if (!raw.trim()) continue;
-          const isChild = /^[ \t　]/.test(raw);
-          if (isChild && groups.length > 0) {
-            groups[groups.length - 1].children.push(raw.trim());
+        // 画面（行ごとの期間の入力欄）と同じ解析を使う。別々に書くと、設定した
+        // 期間が別の行に付くずれが起きる。
+        const parsed = parseBulkRows(bulkText);
+        const groups: { row: BulkRow; children: BulkRow[] }[] = [];
+        for (const row of parsed) {
+          if (row.isChild && groups.length > 0) {
+            groups[groups.length - 1].children.push(row);
           } else {
-            groups.push({ title: raw.trim(), children: [] });
+            groups.push({ row, children: [] });
           }
         }
         if (groups.length === 0) {
           setSaving(false);
           return;
         }
+        const sharedRange: BulkRange = { start: startDate, due: dueDate };
         const shared = {
           assigneeId: assigneeId || null,
-          startDate,
-          dueDate,
           status,
           priority,
           taskType: taskType || null,
@@ -1032,25 +1059,35 @@ export default function TasksPage() {
         };
         const created: Task[] = [];
         for (const group of groups) {
+          const pr = resolveBulkRange(bulkRanges[group.row.key], sharedRange);
           const parent = await createTask({
             ...shared,
-            title: group.title,
+            title: group.row.title,
+            startDate: pr.start,
+            dueDate: pr.due,
             parentId: null,
           });
           created.push(parent);
           if (group.children.length > 0) {
             const kids = await createTasks(
-              group.children.map((t) => ({
-                ...shared,
-                title: t,
-                parentId: parent.id,
-              })),
+              group.children.map((c) => {
+                const cr = resolveBulkRange(bulkRanges[c.key], sharedRange);
+                return {
+                  ...shared,
+                  title: c.title,
+                  startDate: cr.start,
+                  dueDate: cr.due,
+                  parentId: parent.id,
+                };
+              }),
             );
             created.push(...kids);
           }
         }
         setTasks((prev) => [...prev, ...created]);
         setBulkText("");
+        setBulkRanges({});
+        setOpenBulkRow(null);
       } else {
         const created = await createTask({
           title: title.trim(),
@@ -1542,6 +1579,27 @@ export default function TasksPage() {
     />
   );
 
+  // まとめて登録：打ち込んだ行と、そのうち個別に期間を設定した数。
+  const bulkRows = useMemo(
+    () => (bulkMode ? parseBulkRows(bulkText) : []),
+    [bulkMode, bulkText],
+  );
+  const bulkCustomCount = bulkRows.filter((r) => bulkRanges[r.key]).length;
+
+  const setBulkRange = (key: string, patch: Partial<BulkRange>) => {
+    setBulkRanges((prev) => {
+      const cur = prev[key] ?? { start: "", due: "" };
+      return { ...prev, [key]: { ...cur, ...patch } };
+    });
+  };
+  const clearBulkRange = (key: string) => {
+    setBulkRanges((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
   const inputClass =
     "rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200";
   // Compact selects for the list-heading row: small enough that the four
@@ -1701,8 +1759,8 @@ export default function TasksPage() {
                 }
                 className={`${inputClass} resize-y`}
               />
-              <span className="text-xs text-zinc-400">
-                行頭にスペースを入れると、直前の行の子タスクになります。担当者・期限・状態は全行に共通で適用されます。
+              <span className="text-xs text-zinc-500">
+                行頭にスペースを入れると、直前の行の子タスクになります。担当者・状態は全行に共通で適用されます。期間は下で行ごとに変えられます。
               </span>
             </label>
           ) : (
@@ -1754,7 +1812,9 @@ export default function TasksPage() {
             </label>
 
             <label className="flex flex-1 flex-col gap-1">
-              <span className="text-sm font-medium text-zinc-700">開始日</span>
+              <span className="text-sm font-medium text-zinc-700">
+                開始日{bulkMode && "（共通）"}
+              </span>
               <input
                 type="date"
                 value={startDate}
@@ -1764,7 +1824,9 @@ export default function TasksPage() {
             </label>
 
             <label className="flex flex-1 flex-col gap-1">
-              <span className="text-sm font-medium text-zinc-700">期限</span>
+              <span className="text-sm font-medium text-zinc-700">
+                期限{bulkMode && "（共通）"}
+              </span>
               <input
                 type="date"
                 value={dueDate}
@@ -1806,6 +1868,125 @@ export default function TasksPage() {
               </select>
             </label>
           </div>
+
+          {/* まとめて登録の「行ごとの期間」。打ち込んだ行がそのまま並び、各行の
+              カレンダーから個別の期間を持てる。設定しない行は上の共通を使う。
+              テキストエリアの中にはボタンを置けないので、下にリストで出している。 */}
+          {bulkMode && bulkRows.length > 0 && (
+            <div className="rounded-xl border border-zinc-200">
+              <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-3 py-2">
+                <span className="text-xs font-medium text-zinc-700">
+                  行ごとの期間（未設定なら共通の期間を使います）
+                </span>
+                <span className="text-[11px] text-zinc-600">
+                  {bulkCustomCount > 0
+                    ? `個別設定 ${bulkCustomCount}件`
+                    : "すべて共通"}
+                </span>
+              </div>
+              <ul className="max-h-64 overflow-y-auto">
+                {bulkRows.map((r) => {
+                  const custom = bulkRanges[r.key];
+                  const open = openBulkRow === r.key;
+                  return (
+                    <li
+                      key={r.key}
+                      className="border-b border-zinc-100 last:border-b-0"
+                    >
+                      <div className="flex items-center gap-2 px-3 py-2">
+                        <span className="min-w-0 flex-1 truncate text-sm text-zinc-800">
+                          {r.isChild && (
+                            <span className="mr-1 text-zinc-400">└</span>
+                          )}
+                          {r.title}
+                        </span>
+                        <span className="flex-none text-xs text-zinc-700">
+                          {custom ? (
+                            <>
+                              {fmtMd(custom.start) || "—"} 〜{" "}
+                              {fmtMd(custom.due) || "—"}
+                            </>
+                          ) : (
+                            <span className="text-zinc-500">共通を使う</span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setOpenBulkRow(open ? null : r.key)}
+                          aria-label={`${r.title} の期間を設定`}
+                          className={`flex-none rounded-md border px-1.5 py-1 ${
+                            custom
+                              ? "border-[#639922] bg-[#f0f4ea] text-[#3B6D11]"
+                              : "border-zinc-300 bg-white text-zinc-500 hover:border-[#639922] hover:text-[#3B6D11]"
+                          }`}
+                        >
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                          >
+                            <rect x="4" y="5" width="16" height="16" rx="2" />
+                            <path d="M8 3v4M16 3v4M4 11h16" />
+                          </svg>
+                        </button>
+                      </div>
+                      {open && (
+                        <div className="flex flex-wrap items-end gap-2 bg-zinc-50 px-3 py-2.5">
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[11px] text-zinc-600">
+                              開始
+                            </span>
+                            <input
+                              type="date"
+                              value={custom?.start ?? startDate}
+                              onChange={(e) =>
+                                setBulkRange(r.key, { start: e.target.value })
+                              }
+                              className="rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-900"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-0.5">
+                            <span className="text-[11px] text-zinc-600">
+                              終了
+                            </span>
+                            <input
+                              type="date"
+                              value={custom?.due ?? dueDate}
+                              onChange={(e) =>
+                                setBulkRange(r.key, { due: e.target.value })
+                              }
+                              className="rounded-md border border-zinc-300 px-2 py-1 text-sm text-zinc-900"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearBulkRange(r.key);
+                              setOpenBulkRow(null);
+                            }}
+                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+                          >
+                            共通に戻す
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOpenBulkRow(null)}
+                            className="ml-auto rounded-md px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-200"
+                          >
+                            閉じる
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           <div className="flex flex-col gap-4 sm:flex-row">
             <label className="flex flex-1 flex-col gap-1">
